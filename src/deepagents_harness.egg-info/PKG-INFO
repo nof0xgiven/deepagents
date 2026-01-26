@@ -1,0 +1,107 @@
+Metadata-Version: 2.4
+Name: deepagents-harness
+Version: 0.1.0
+Summary: Deepagents CLI harness configured for gpt-5.2-codex
+Author: Ava
+License: MIT
+Requires-Python: <4.0,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: deepagents==0.3.8
+Requires-Dist: langchain<2.0.0,>=1.2.3
+Requires-Dist: langchain-openai<2.0.0,>=1.1.7
+Requires-Dist: langchain-mcp-adapters<1.0.0,>=0.0.5
+Requires-Dist: mcp<2.0.0,>=1.2.0
+Requires-Dist: langgraph-checkpoint-sqlite<4.0.0,>=3.0.0
+Requires-Dist: requests
+Requires-Dist: rich>=13.0.0
+Requires-Dist: prompt-toolkit>=3.0.52
+Requires-Dist: tavily-python
+Requires-Dist: python-dotenv
+Requires-Dist: daytona>=0.113.0
+Requires-Dist: modal>=0.65.0
+Requires-Dist: markdownify>=0.13.0
+Requires-Dist: runloop-api-client>=0.69.0
+Requires-Dist: pillow>=10.0.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: textual>=1.0.0
+Requires-Dist: textual-autocomplete>=3.0.0
+Requires-Dist: aiosqlite>=0.19.0
+
+# DeepAgents CLI Harness
+
+This repo packages a configured DeepAgents CLI so you can run `deepagents` in your terminal and start an interactive session.
+
+## Quickstart
+
+```bash
+# Create venv
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install
+pip install -e .
+
+# Run (auto-approve on by default)
+DEEPAGENTS_REASONING_EFFORT=high deepagents
+```
+
+## Environment
+
+Required in `.env` (already present in this repo):
+
+- `OPENAI_API_KEY`
+- `LANGSMITH_API_KEY`
+- `MORPH_API_KEY`
+
+Optional overrides:
+
+- `OPENAI_MODEL` (default: `gpt-5.2-codex`)
+- `DEEPAGENTS_SERVICE_TIER` (default: `priority`)
+- `DEEPAGENTS_REASONING_EFFORT` (default: `high`; allowed: `none|low|medium|high|xhigh`)
+
+## CLI
+
+```bash
+# Start interactive TUI
+deepagents
+
+# Use a specific agent profile (separate memory/skills)
+deepagents --agent mybot
+
+# Override model (provider auto-detected)
+deepagents --model gpt-5.2-codex
+
+# Override reasoning/service tier
+deepagents --reasoning medium --service-tier priority
+
+# Require approvals
+deepagents --no-auto-approve
+```
+
+## Features
+
+- **DeepAgents CLI** with TUI, threads, skills, and persistent memory (AGENTS.md)
+- **OpenAI Responses API** for `gpt-5.2-codex`, with required `service_tier=priority`
+- **Subagents** for parallel delegation
+- **Skills** via `~/.deepagents/<agent>/skills/` and `<project>/.deepagents/skills/`
+- **Morph tools**: `warp_grep`, `fast_apply`
+
+## Memory + Skills Layout
+
+```
+~/.deepagents/<agent>/
+  ├── AGENTS.md
+  └── skills/
+      └── <skill>/SKILL.md
+
+<project>/.deepagents/
+  ├── AGENTS.md
+  └── skills/
+      └── <skill>/SKILL.md
+```
+
+## Notes
+
+- The CLI uses DeepAgents middleware for memory and skills.
+- The default model is `gpt-5.2-codex` with Responses API enabled.
+- Reasoning effort defaults to `high` but can be overridden per run.

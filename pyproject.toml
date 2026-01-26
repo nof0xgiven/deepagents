@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepagents-harness"
+version = "0.1.0"
+description = "Deepagents CLI harness configured for gpt-5.2-codex"
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+license = { text = "MIT" }
+authors = [{ name = "Ava" }]
+
+dependencies = [
+  "deepagents==0.3.8",
+  "langchain>=1.2.3,<2.0.0",
+  "langchain-openai>=1.1.7,<2.0.0",
+  "langchain-mcp-adapters>=0.0.5,<1.0.0",
+  "mcp>=1.2.0,<2.0.0",
+  "langgraph-checkpoint-sqlite>=3.0.0,<4.0.0",
+  "requests",
+  "rich>=13.0.0",
+  "prompt-toolkit>=3.0.52",
+  "tavily-python",
+  "python-dotenv",
+  "daytona>=0.113.0",
+  "modal>=0.65.0",
+  "markdownify>=0.13.0",
+  "runloop-api-client>=0.69.0",
+  "pillow>=10.0.0",
+  "pyyaml>=6.0",
+  "textual>=1.0.0",
+  "textual-autocomplete>=3.0.0",
+  "aiosqlite>=0.19.0",
+]
+
+[project.scripts]
+deepagents = "deepagents_cli.main:cli_main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["deepagents_cli*"]
+
+[tool.setuptools.package-data]
+"deepagents_cli" = [
+  "py.typed",
+  "*.md",
+  "*.tcss",
+]

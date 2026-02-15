@@ -1,12 +1,41 @@
-# DeepAgents
+# DeepAgents CLI
 
-An AI coding agent that runs in your terminal. DeepAgents gives you a full TUI — autocomplete, model switching, tool approvals, persistent memory, skills, and multi-model support — built on LangChain and LangGraph. Think of it as a local-first, extensible alternative to cloud-hosted coding assistants, where you own the agent loop and can plug in any LLM provider.
+> **Status: Alpha** — actively developed, things will break and change.
 
-## What it does
+## What this is
 
-You type. The agent reads your codebase, writes code, runs commands, and manages files — all inside a Textual-powered terminal UI. It remembers context across sessions, delegates to subagents for parallel work, and integrates with external tools via MCP servers and extensions.
+[Deep Agents](https://github.com/langchain-ai/deepagents) is an open-source agent framework by LangChain. It gives you a planning tool, a virtual filesystem, subagent spawning, and persistent memory — the architectural patterns behind tools like Claude Code and Deep Research, packaged as a Python library.
 
-It supports OpenAI, Anthropic, Google, and any OpenAI-compatible provider. You can switch models mid-conversation, configure reasoning effort, and bring your own API keys.
+What it doesn't give you is a way to actually *use* it day-to-day. There's no terminal UI, no model switching, no way to plug in your Anthropic or Google credentials, no OAuth, no plugin system, and no MCP integration. The base library is a foundation — you're expected to build the rest yourself.
+
+**This repo is the rest.**
+
+We built a full terminal interface and configuration layer on top of `deepagents==0.4.1`, turning it from a framework into a usable coding agent. Everything here is additive — we don't fork or patch deepagents, we import it as a dependency and layer our code on top. When LangChain ships `0.5.0`, you bump the version and our additions should carry forward.
+
+### What we added
+
+| Layer | What it does | Why it's needed |
+|---|---|---|
+| **Terminal UI** | Full Textual TUI with chat, streaming, tool approvals, slash commands, autocomplete | deepagents has no interface — it's a library, not an app |
+| **Multi-provider auth** | API keys, OAuth tokens, and credential rotation for OpenAI, Anthropic, Google | deepagents uses `init_chat_model` — you wire up auth yourself |
+| **Model registry** | Catalog system with live switching, aliases, reasoning effort, service tiers | No built-in way to manage or switch models at runtime |
+| **Provider adapters** | Wrappers for OpenAI Responses API, Anthropic Messages, Google Generative AI | deepagents is model-agnostic but you write the glue code |
+| **OAuth support** | Use your existing Claude Pro/Max or Google AI Studio subscription | Base library only supports API keys via environment variables |
+| **Extensions** | Plugin system for custom tools, middleware, subagents, and hooks | deepagents is extendable but has no plugin architecture |
+| **MCP integration** | Chrome DevTools, external tool servers via Model Context Protocol | Not included in base deepagents |
+| **Command system** | `/model`, `/assemble`, `/clear`, `/remember`, `/tokens` and more | No CLI command framework in base library |
+| **Linear integration** | `/assemble` pipeline: scout -> planner -> worker -> reviewer on Linear issues | Domain-specific workflow not in base library |
+| **Session management** | Thread persistence, checkpoint resumption, conversation history | deepagents provides checkpointing primitives but no session UX |
+
+### What we didn't change
+
+The base `deepagents` package is a clean dependency. We call `create_deep_agent()`, use its `CompositeBackend`, `MemoryMiddleware`, `SkillsMiddleware`, and subagent system exactly as designed. No monkey-patching, no forks. Our code lives entirely in the `deepagents_cli` package.
+
+```
+deepagents (LangChain)          <-- agent loop, planning, filesystem, subagents
+    ↑
+deepagents_cli (this repo)      <-- TUI, auth, models, extensions, commands, MCP
+```
 
 ## Quickstart
 
@@ -21,11 +50,13 @@ pip install -e .
 deepagents
 ```
 
-On first launch, the model selector opens automatically. Pick a model and start working.
+On first launch, the model selector opens. Pick a provider, enter credentials, start working.
 
 ## Configuration
 
-Create `~/.deepagents/.env` for API keys:
+### API keys
+
+Create `~/.deepagents/.env`:
 
 ```bash
 OPENAI_API_KEY=...
@@ -33,7 +64,11 @@ ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
 ```
 
-Or use `~/.deepagents/auth.json` for multi-provider setups and OAuth (see `docs/oauth.md`).
+### OAuth (use your existing Pro/Max plan)
+
+For Anthropic Claude or Google, you can authenticate via OAuth instead of API keys. This lets you use your existing subscription without separate API billing.
+
+See `docs/oauth.md` for setup. Credentials are stored in `~/.deepagents/auth.json`.
 
 ### Environment variables
 
@@ -61,7 +96,7 @@ deepagents --no-auto-approve            # Require tool approvals
 | `/model` | Open model selector |
 | `/model my-alias` | Switch to a model by alias |
 | `/debug model` | Inspect resolved model config |
-| `/assemble` | Run Linear issue pipeline (scout -> planner -> worker -> reviewer) |
+| `/assemble` | Run Linear issue pipeline |
 | `/clear` | Clear chat, start new session |
 | `/remember` | Persist learnings to memory and skills |
 | `/tokens` | Show token usage |
@@ -71,7 +106,7 @@ Type `@` to fuzzy-search project files. Type `/` to browse commands.
 
 ## Model selection
 
-The model selector reads from three files in `~/.deepagents/`:
+The model selector reads from `~/.deepagents/`:
 
 **models.json** — provider catalog:
 ```json
@@ -83,15 +118,22 @@ The model selector reads from three files in `~/.deepagents/`:
       "models": [
         { "id": "gpt-4o", "alias": "primary", "reasoning": "high" }
       ]
+    },
+    "anthropic": {
+      "api": "anthropic-messages",
+      "models": [
+        { "id": "claude-sonnet-4-5-20250929", "alias": "sonnet" }
+      ]
     }
   }
 }
 ```
 
-**auth.json** — credentials:
+**auth.json** — credentials (API key or OAuth):
 ```json
 {
-  "openai": { "type": "api_key", "key": "sk-..." }
+  "openai": { "type": "api_key", "key": "sk-..." },
+  "anthropic": { "type": "oauth", "access_token": "...", "refresh_token": "..." }
 }
 ```
 
@@ -106,26 +148,49 @@ The model selector reads from three files in `~/.deepagents/`:
 }
 ```
 
-See `docs/models.md`, `docs/providers.md`, `docs/settings.md` for full reference.
+See `docs/models.md`, `docs/providers.md`, `docs/oauth.md`, `docs/settings.md`.
 
-## Features
+## Architecture
 
-- **Terminal UI** built with Textual — keyboard-driven, dark theme, responsive layout
-- **Multi-provider** support: OpenAI, Anthropic, Google, and any OpenAI-compatible API
-- **Live model switching** via `/model` selector with alias support
-- **Tool approval flow** with auto-approve toggle (Shift+Tab)
-- **Persistent memory** across sessions via AGENTS.md
-- **Skills** — reusable prompt modules loaded from `~/.deepagents/<agent>/skills/`
-- **Subagents** for parallel task delegation
-- **Extensions** — pluggable Python modules for custom integrations
-- **Chrome DevTools MCP** — browse, click, and automate web pages from the agent
-- **File autocomplete** — fuzzy `@file` search across git-tracked files
-- **Slash commands** — `/assemble`, `/model`, `/clear`, `/remember`, and more
-- **Session threads** with checkpoint-based history resumption
+```
+┌─────────────────────────────────────────────────┐
+│  Terminal UI (Textual)                          │
+│  Chat, approvals, model selector, status bar    │
+├─────────────────────────────────────────────────┤
+│  Command System        Extensions / Plugins     │
+│  /model /assemble      Linear, custom hooks     │
+├─────────────────────────────────────────────────┤
+│  Auth Store            Model Registry           │
+│  OAuth, API keys       Catalog, switching       │
+├─────────────────────────────────────────────────┤
+│  Provider Adapters     MCP Integration          │
+│  OpenAI, Anthropic,    Chrome DevTools,         │
+│  Google, compatible    external servers          │
+├─────────────────────────────────────────────────┤
+│  deepagents 0.4.1 (LangChain)                  │
+│  Agent loop, planning, filesystem, subagents,   │
+│  memory middleware, skills middleware            │
+├─────────────────────────────────────────────────┤
+│  LangChain / LangGraph                          │
+└─────────────────────────────────────────────────┘
+```
+
+Everything above the `deepagents` layer is this repo. Everything below is upstream.
+
+## Upgrading deepagents
+
+This repo pins `deepagents==0.4.1` in `pyproject.toml`. To upgrade:
+
+1. Bump the version in `pyproject.toml`
+2. Check `agent.py` — it's the main integration point that calls `create_deep_agent()`
+3. Run the app, verify middleware and subagents still work
+4. Our config, auth, UI, and extensions layers are independent and shouldn't need changes
+
+The coupling points are: `create_deep_agent()` signature, `CompositeBackend` protocol, `MemoryMiddleware` / `SkillsMiddleware` interfaces, and the subagent parameter format. If LangChain changes those, `agent.py` needs updating. Everything else is decoupled.
 
 ## Extensions
 
-Extensions are Python modules that register tools, middleware, or commands. They load from `~/.deepagents/extensions/` and `<project>/.deepagents/extensions/`.
+Extensions are Python modules that register tools, middleware, or commands:
 
 ```json
 {
@@ -136,11 +201,11 @@ Extensions are Python modules that register tools, middleware, or commands. They
 }
 ```
 
-Built-in: **Linear** (`deepagents_cli.ext.linear:register`) — powers the `/assemble` pipeline.
+Built-in: **Linear** (`deepagents_cli.ext.linear:register`) — powers `/assemble`.
 
 See `docs/extensions.md` for the full extension API.
 
-## Memory and skills layout
+## Memory and skills
 
 ```
 ~/.deepagents/<agent>/
@@ -149,26 +214,23 @@ See `docs/extensions.md` for the full extension API.
   skills/<skill>/SKILL.md       # Reusable skill definitions
 
 <project>/.deepagents/
-  AGENTS.md                     # Project-specific agent context
+  AGENTS.md                     # Project-scoped context
   subagents/<name>.md
   skills/<skill>/SKILL.md
 ```
 
-## Chrome DevTools
+## Alpha status
 
-The agent can control Chrome for web automation. It starts `chrome-devtools-mcp` via npx by default.
+This is alpha software. Expect:
 
-To attach to your own browser session:
+- Breaking changes between versions
+- Incomplete error handling in edge cases
+- UI rough edges
+- Provider-specific quirks (especially OAuth token refresh)
 
-```bash
-DEEPAGENTS_CHROME_BROWSER_URL=http://127.0.0.1:9222 deepagents
-```
+What works well: the core agent loop (thanks to deepagents), model switching, tool approvals, session persistence, and the extension system. What's still rough: onboarding UX, documentation, and some provider edge cases.
 
-To disable entirely:
-
-```bash
-DEEPAGENTS_CHROME_MCP=0 deepagents
-```
+Contributions and bug reports welcome.
 
 ## License
 

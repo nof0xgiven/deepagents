@@ -2,6 +2,8 @@
 
 > **Status: Alpha** — actively developed, things will break and change.
 
+<image src="image.png" />
+
 ## What this is
 
 [Deep Agents](https://github.com/langchain-ai/deepagents) is an open-source agent framework by LangChain. It gives you a planning tool, a virtual filesystem, subagent spawning, and persistent memory — the architectural patterns behind tools like Claude Code and Deep Research, packaged as a Python library.
@@ -10,7 +12,7 @@ What it doesn't give you is a way to actually *use* it day-to-day. There's no te
 
 **This repo is the rest.**
 
-We built a full terminal interface and configuration layer on top of `deepagents==0.4.1`, turning it from a framework into a usable coding agent. Everything here is additive — we don't fork or patch deepagents, we import it as a dependency and layer our code on top. When LangChain ships `0.5.0`, you bump the version and our additions should carry forward.
+We (Claude decided it was a collaborative "we" 😁) built a full terminal interface and configuration layer on top of `deepagents==0.4.1`, turning it from a framework into a usable coding agent. Everything here is additive — we don't fork or patch deepagents, we import it as a dependency and layer our code on top. When LangChain ships `0.5.0`, you bump the version and our additions should carry forward.
 
 ### What we added
 
@@ -84,7 +86,7 @@ See `docs/oauth.md` for setup. Credentials are stored in `~/.deepagents/auth.jso
 ```bash
 deepagents                              # Interactive TUI
 deepagents --agent mybot                # Named agent profile (separate memory/skills)
-deepagents --model openai:gpt-4o        # Override model
+deepagents --model openai:gpt-5.2        # Override model
 deepagents --reasoning medium           # Override reasoning effort
 deepagents --no-auto-approve            # Require tool approvals
 ```
@@ -116,7 +118,7 @@ The model selector reads from `~/.deepagents/`:
       "base_url": "https://api.openai.com/v1",
       "api": "openai-responses",
       "models": [
-        { "id": "gpt-4o", "alias": "primary", "reasoning": "high" }
+        { "id": "gpt-5.2", "alias": "primary", "reasoning": "high" }
       ]
     },
     "anthropic": {

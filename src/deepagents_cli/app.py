@@ -18,9 +18,15 @@ from textual.events import Click, MouseUp
 from textual.widgets import Static
 
 from deepagents_cli.clipboard import copy_selection_to_clipboard
+from deepagents_cli.commands import build_default_registry
+from deepagents_cli.commands.types import CommandContext
+from deepagents_cli.config import settings
+from deepagents_cli.model_registry import ModelEntry
+from deepagents_cli.model_controller import ModelController
+from deepagents_cli.widgets.model_selector import ModelSelectorScreen
 from deepagents_cli.textual_adapter import TextualUIAdapter, execute_task_textual
 from deepagents_cli.widgets.approval import ApprovalMenu
-from deepagents_cli.widgets.chat_input import ChatInput
+from deepagents_cli.widgets.chat_input import ChatInput, SlashCommandMenu
 from deepagents_cli.widgets.loading import LoadingWidget
 from deepagents_cli.widgets.messages import (
     AssistantMessage,
@@ -96,121 +102,6 @@ class TextualSessionState:
         return self.thread_id
 
 
-# Prompt for /remember command - triggers agent to review conversation and update memory/skills
-REMEMBER_PROMPT = """Review our conversation and capture valuable knowledge. Focus especially on **best practices** we discussed or discovered—these are the most important things to preserve.
-
-## Step 1: Identify Best Practices and Key Learnings
-
-Scan the conversation for:
-
-### Best Practices (highest priority)
-- **Patterns that worked well** - approaches, techniques, or solutions we found effective
-- **Anti-patterns to avoid** - mistakes, gotchas, or approaches that caused problems
-- **Quality standards** - criteria we established for good code, documentation, or processes
-- **Decision rationale** - why we chose one approach over another
-
-### Other Valuable Knowledge
-- Coding conventions and style preferences
-- Project architecture decisions
-- Workflows and processes we developed
-- Tools, libraries, or techniques worth remembering
-- Feedback I gave about your behavior or outputs
-
-## Step 2: Decide Where to Store Each Learning
-
-For each best practice or learning, choose the right destination:
-
-### → Memory (AGENTS.md) for preferences and guidelines
-Use memory when the knowledge is:
-- A preference or guideline (not a multi-step process)
-- Something to always keep in mind
-- A simple rule or pattern
-
-**Global** (`~/.deepagents/agent/AGENTS.md`): Universal preferences across all projects
-**Project** (`.deepagents/AGENTS.md`): Project-specific conventions and decisions
-
-### → Skill for reusable workflows and methodologies
-**Create a skill when** we developed:
-- A multi-step process worth reusing
-- A methodology for a specific type of task
-- A workflow with best practices baked in
-- A procedure that should be followed consistently
-
-Skills are more powerful than memory entries because they can encode **how** to do something well, not just **what** to remember.
-
-## Step 3: Create Skills for Significant Best Practices
-
-If we established best practices around a workflow or process, capture them in a skill.
-
-**Example:** If we discussed best practices for code review, create a `code-review` skill that encodes those practices into a reusable workflow.
-
-### Skill Location
-`~/.deepagents/agent/skills/<skill-name>/SKILL.md`
-
-### Skill Structure
-```
-skill-name/
-├── SKILL.md          (required - main instructions with best practices)
-├── scripts/          (optional - executable code)
-├── references/       (optional - detailed documentation)
-└── assets/           (optional - templates, examples)
-```
-
-### SKILL.md Format
-```markdown
----
-name: skill-name
-description: "What this skill does AND when to use it. Include triggers like 'when the user asks to X' or 'when working with Y'. This description determines when the skill activates."
----
-
-# Skill Name
-
-## Overview
-Brief explanation of what this skill accomplishes.
-
-## Best Practices
-Capture the key best practices upfront:
-- Best practice 1: explanation
-- Best practice 2: explanation
-
-## Process
-Step-by-step instructions (imperative form):
-1. First, do X
-2. Then, do Y
-3. Finally, do Z
-
-## Common Pitfalls
-- Pitfall to avoid and why
-- Another anti-pattern we discovered
-```
-
-### Key Principles
-1. **Encode best practices prominently** - Put them near the top so they guide the entire workflow
-2. **Concise is key** - Only include non-obvious knowledge. Every paragraph should justify its token cost.
-3. **Clear triggers** - The description determines when the skill activates. Be specific.
-4. **Imperative form** - Write as commands: "Create a file" not "You should create a file"
-5. **Include anti-patterns** - What NOT to do is often as valuable as what to do
-
-## Step 4: Update Memory for Simpler Learnings
-
-For preferences, guidelines, and simple rules that don't warrant a full skill:
-
-```markdown
-## Best Practices
-- When doing X, always Y because Z
-- Avoid A because it leads to B
-```
-
-Use `edit_file` to update existing files or `write_file` to create new ones.
-
-## Step 5: Summarize Changes
-
-List what you captured and where you stored it:
-- Skills created (with key best practices encoded)
-- Memory entries added (with location)
-"""
-
-
 class DeepAgentsApp(App):
     """Main Textual application for deepagents-cli."""
 
@@ -251,6 +142,7 @@ class DeepAgentsApp(App):
         agent: Pregel | None = None,
         assistant_id: str | None = None,
         backend: Any = None,  # noqa: ANN401  # CompositeBackend
+        agent_builder: Any = None,
         auto_approve: bool = False,
         cwd: str | Path | None = None,
         thread_id: str | None = None,
@@ -263,6 +155,7 @@ class DeepAgentsApp(App):
             agent: Pre-configured LangGraph agent (optional for standalone mode)
             assistant_id: Agent identifier for memory storage
             backend: Backend for file operations
+            agent_builder: Optional callback to rebuild the agent for a new model
             auto_approve: Whether to start with auto-approve enabled
             cwd: Current working directory to display
             thread_id: Optional thread ID for session persistence
@@ -273,6 +166,7 @@ class DeepAgentsApp(App):
         self._agent = agent
         self._assistant_id = assistant_id
         self._backend = backend
+        self._agent_builder = agent_builder
         self._auto_approve = auto_approve
         self._cwd = str(cwd) if cwd else str(Path.cwd())
         # Avoid collision with App._thread_id
@@ -289,17 +183,20 @@ class DeepAgentsApp(App):
         self._agent_running = False
         self._loading_widget: LoadingWidget | None = None
         self._token_tracker: TextualTokenTracker | None = None
+        self._model_controller = ModelController(project_root=settings.project_root)
+        self._command_registry = build_default_registry()
 
     def compose(self) -> ComposeResult:
         """Compose the application layout."""
         # Main chat area with scrollable messages
-        # Input is inside scroll so it appears right below content initially
+        # Spacer above content pushes welcome+input to bottom of viewport
         with VerticalScroll(id="chat"):
+            yield Static(id="chat-spacer")  # Pushes content to bottom
             yield WelcomeBanner(id="welcome-banner")
             yield Container(id="messages")
             with Container(id="bottom-app-container"):
+                yield SlashCommandMenu(id="slash-command-menu")
                 yield ChatInput(cwd=self._cwd, id="input-area")
-            yield Static(id="chat-spacer")  # Fills remaining space below input
 
         # Status bar at bottom
         yield StatusBar(cwd=self._cwd, id="status-bar")
@@ -334,9 +231,15 @@ class DeepAgentsApp(App):
                 hide_thinking=self._hide_thinking,
             )
             self._ui_adapter.set_token_tracker(self._token_tracker)
+        else:
+            self._update_status("Select a model to begin")
+            if self._status_bar:
+                self._status_bar.set_model("no model")
+            self.call_after_refresh(lambda: asyncio.create_task(self._open_model_selector()))
 
         # Focus the input (autocomplete is now built into ChatInput)
         self._chat_input.focus_input()
+        self._chat_input.set_prompt_active(active=True)
 
         # Size the spacer to fill remaining viewport below input
         self.call_after_refresh(self._size_initial_spacer)
@@ -345,7 +248,7 @@ class DeepAgentsApp(App):
         if self._lc_thread_id and self._agent:
             self.call_after_refresh(lambda: asyncio.create_task(self._load_thread_history()))
         # Auto-submit initial prompt if provided (but not when resuming - let user see history first)
-        elif self._initial_prompt and self._initial_prompt.strip():
+        elif self._agent and self._initial_prompt and self._initial_prompt.strip():
             # Use call_after_refresh to ensure UI is fully mounted before submitting
             self.call_after_refresh(
                 lambda: asyncio.create_task(self._handle_user_message(self._initial_prompt))
@@ -395,20 +298,34 @@ class DeepAgentsApp(App):
 
     def _size_initial_spacer(self) -> None:
         """Size the spacer to fill remaining viewport below input."""
-        chat = self.query_one("#chat", VerticalScroll)
-        welcome = self.query_one("#welcome-banner", WelcomeBanner)
-        input_container = self.query_one("#bottom-app-container", Container)
-        spacer = self.query_one("#chat-spacer", Static)
-        content_height = welcome.size.height + input_container.size.height + 4
-        spacer_height = chat.size.height - content_height
-        if spacer_height > 0:
-            spacer.styles.height = spacer_height
+        self._resize_spacer()
 
-    async def _remove_spacer(self) -> None:
-        """Remove the initial spacer when first message is sent."""
+    def _resize_spacer(self) -> None:
+        """Resize spacer to keep content bottom-aligned in viewport.
+
+        Calculates: spacer = max(0, viewport - content_height).
+        As messages accumulate the spacer shrinks; once content overflows
+        the spacer is 0 and we scroll to keep the input visible.
+        """
         try:
             spacer = self.query_one("#chat-spacer", Static)
-            await spacer.remove()
+            chat = self.query_one("#chat", VerticalScroll)
+
+            # Sum outer heights of all chat children except the spacer
+            content_height = sum(
+                child.outer_size.height
+                for child in chat.children
+                if child.id != "chat-spacer"
+            )
+
+            # chat has padding: 2 3 → 2 top + 2 bottom = 4 vertical
+            available = chat.size.height - 4
+            remaining = max(0, available - content_height)
+            spacer.styles.height = remaining
+
+            # When content overflows viewport, scroll to keep input visible
+            if remaining == 0:
+                self._scroll_chat_to_bottom()
         except NoMatches:
             pass
 
@@ -487,6 +404,19 @@ class DeepAgentsApp(App):
         if self._status_bar:
             self._status_bar.set_mode(event.mode)
 
+    def on_chat_input_slash_menu_update(self, event: ChatInput.SlashMenuUpdate) -> None:
+        """Handle slash menu updates from ChatInput."""
+        try:
+            menu = self.query_one("#slash-command-menu", SlashCommandMenu)
+        except NoMatches:
+            return
+        if event.visible and event.suggestions:
+            menu.update_suggestions(event.suggestions, event.selected_index)
+            self.call_after_refresh(self._resize_spacer)
+        else:
+            menu.hide_menu()
+            self.call_after_refresh(self._resize_spacer)
+
     async def on_approval_menu_decided(
         self,
         event: Any,  # noqa: ANN401, ARG002
@@ -544,80 +474,179 @@ class DeepAgentsApp(App):
         except OSError as e:
             await self._mount_message(ErrorMessage(str(e)))
 
+    @staticmethod
+    def _strip_model_prefix(model_name: str) -> str:
+        """Normalize model name by stripping provider prefixes."""
+        return ModelController.strip_model_prefix(model_name)
+
+    @staticmethod
+    def _truncate_model_name(name: str) -> str:
+        """Truncate model name to last meaningful segment.
+
+        E.g. 'claude-opus-4-6' -> 'opus-4-6', 'gpt-4o-mini' -> 'gpt-4o-mini'
+        """
+        return ModelController.truncate_model_name(name)
+
+    def _format_model_entry(self, entry: ModelEntry, index: int | None = None) -> str:
+        return self._model_controller.format_model_entry(entry, index=index)
+
+    def _available_tool_names(self) -> set[str]:
+        """Best-effort tool capability lookup for the current session."""
+        names: set[str] = set()
+        for source in (self._backend, self._agent):
+            tool_names = getattr(source, "available_tool_names", None)
+            if isinstance(tool_names, set):
+                names.update(str(item) for item in tool_names if isinstance(item, str))
+            elif isinstance(tool_names, (list, tuple)):
+                names.update(str(item) for item in tool_names if isinstance(item, str))
+        return names
+
+    def _build_model_catalog(self) -> list[ModelEntry]:
+        return self._model_controller.build_model_catalog()
+
+    async def _switch_model(self, model_name: str, entry: ModelEntry | None = None) -> None:
+        if self._agent_running:
+            await self._mount_message(
+                SystemMessage("Cannot switch models while the agent is running.")
+            )
+            return
+        if not self._agent_builder:
+            await self._mount_message(
+                SystemMessage("Model switching is not available in this session.")
+            )
+            return
+
+        normalized = self._model_controller.strip_model_prefix(model_name)
+        auto_approve = self._session_state.auto_approve if self._session_state else False
+
+        reasoning_override = entry.reasoning_effort if entry else None
+        service_tier_override = entry.service_tier if entry else None
+
+        try:
+            agent, backend = self._agent_builder(
+                normalized,
+                auto_approve_override=auto_approve,
+                reasoning_effort_override=reasoning_override,
+                service_tier_override=service_tier_override,
+            )
+        except SystemExit:
+            await self._mount_message(
+                ErrorMessage("Model switch failed. Check API keys and model name.")
+            )
+            return
+        except Exception as exc:
+            await self._mount_message(ErrorMessage(f"Model switch failed: {exc}"))
+            return
+
+        self._agent = agent
+        self._backend = backend
+        if self._ui_adapter is None:
+            self._ui_adapter = TextualUIAdapter(
+                mount_message=self._mount_message,
+                update_status=self._update_status,
+                request_approval=self._request_approval,
+                on_auto_approve_enabled=self._on_auto_approve_enabled,
+                scroll_to_bottom=self._scroll_chat_to_bottom,
+                show_thinking=self._show_thinking,
+                hide_thinking=self._hide_thinking,
+            )
+            self._ui_adapter.set_token_tracker(self._token_tracker)
+        if self._token_tracker:
+            self._token_tracker.reset()
+        raw_name = entry.display_name if entry else (settings.model_name or normalized)
+        display_name = self._model_controller.truncate_model_name(raw_name)
+        if self._status_bar:
+            self._status_bar.set_model(display_name)
+        await self._mount_message(SystemMessage(f"Active model: {display_name}"))
+
+        if entry is not None:
+            self._model_controller.persist_active_selection(entry)
+
+    def _format_debug_model(self) -> list[str]:
+        return self._model_controller.format_debug_model()
+
+    def _handle_model_selector_result(self, result: ModelEntry | None) -> None:
+        self._model_controller.set_model_selector_open(is_open=False)
+        if result is None:
+            return
+        self.run_worker(self._switch_model(result.id, result), exclusive=False)
+
+    async def _open_model_selector(self) -> None:
+        if self._model_controller.model_selector_open:
+            return
+        entries = self._build_model_catalog()
+        if not entries:
+            await self._mount_message(
+                SystemMessage(
+                    "No model catalog found. Add ~/.deepagents/models.json "
+                    "or set model.active in ~/.deepagents/settings.json."
+                )
+            )
+            return
+        self._model_controller.set_model_selector_open(is_open=True)
+        current_key = None
+        if settings.model_provider and settings.model_name:
+            current_key = f"{settings.model_provider}:{settings.model_name}"
+        screen = ModelSelectorScreen(entries=entries, current_model_id=current_key)
+        self.push_screen(screen, self._handle_model_selector_result)
+
+    async def _mount_user_text(self, content: str) -> None:
+        await self._mount_message(UserMessage(content))
+
+    async def _mount_system_text(self, content: str) -> None:
+        await self._mount_message(SystemMessage(content))
+
+    async def _mount_error_text(self, content: str) -> None:
+        await self._mount_message(ErrorMessage(content))
+
+    def _reset_tokens(self) -> None:
+        if self._token_tracker:
+            self._token_tracker.reset()
+
+    def _reset_thread(self) -> str | None:
+        if not self._session_state:
+            return None
+        return self._session_state.reset_thread()
+
+    def _current_thread_id(self) -> str | None:
+        if not self._session_state:
+            return None
+        return self._session_state.thread_id
+
+    def _current_context_tokens(self) -> int:
+        if not self._token_tracker:
+            return 0
+        return self._token_tracker.current_context
+
     async def _handle_command(self, command: str) -> None:
         """Handle a slash command.
 
         Args:
             command: The slash command (including /)
         """
-        cmd = command.lower().strip()
-
-        if cmd in ("/quit", "/exit", "/q"):
-            self.exit()
-        elif cmd == "/help":
-            await self._mount_message(UserMessage(command))
-            await self._mount_message(
-                SystemMessage("Commands: /quit, /clear, /remember, /tokens, /threads, /help")
-            )
-
-        elif cmd == "/version":
-            await self._mount_message(UserMessage(command))
-            # Show CLI package version
-            try:
-                from deepagents_cli._version import __version__
-
-                await self._mount_message(SystemMessage(f"deepagents version: {__version__}"))
-            except Exception:
-                await self._mount_message(SystemMessage("deepagents version: unknown"))
-        elif cmd == "/clear":
-            await self._clear_messages()
-            if self._token_tracker:
-                self._token_tracker.reset()
-            # Clear status message (e.g., "Interrupted" from previous session)
-            self._update_status("")
-            # Reset thread to start fresh conversation
-            if self._session_state:
-                new_thread_id = self._session_state.reset_thread()
-                await self._mount_message(SystemMessage(f"Started new session: {new_thread_id}"))
-        elif cmd == "/threads":
-            await self._mount_message(UserMessage(command))
-            if self._session_state:
-                await self._mount_message(
-                    SystemMessage(f"Current session: {self._session_state.thread_id}")
-                )
-            else:
-                await self._mount_message(SystemMessage("No active session"))
-        elif cmd == "/tokens":
-            await self._mount_message(UserMessage(command))
-            if self._token_tracker and self._token_tracker.current_context > 0:
-                count = self._token_tracker.current_context
-                if count >= 1000:
-                    formatted = f"{count / 1000:.1f}K"
-                else:
-                    formatted = str(count)
-                await self._mount_message(SystemMessage(f"Current context: {formatted} tokens"))
-            else:
-                await self._mount_message(SystemMessage("No token usage yet"))
-        elif cmd == "/remember" or cmd.startswith("/remember "):
-            # Extract any additional context after /remember
-            additional_context = ""
-            if cmd.startswith("/remember "):
-                additional_context = command.strip()[len("/remember ") :].strip()
-
-            # Build the final prompt
-            if additional_context:
-                final_prompt = (
-                    f"{REMEMBER_PROMPT}\n\n**Additional context from user:** {additional_context}"
-                )
-            else:
-                final_prompt = REMEMBER_PROMPT
-
-            # Send as a user message to the agent
-            await self._handle_user_message(final_prompt)
-            return  # _handle_user_message already mounts the message
-        else:
-            await self._mount_message(UserMessage(command))
-            await self._mount_message(SystemMessage(f"Unknown command: {cmd}"))
+        context = CommandContext(
+            command=command,
+            normalized=command.lower().strip(),
+            mount_user=self._mount_user_text,
+            mount_system=self._mount_system_text,
+            mount_error=self._mount_error_text,
+            handle_user_message=self._handle_user_message,
+            clear_messages=self._clear_messages,
+            clear_status=lambda: self._update_status(""),
+            exit_app=self.exit,
+            reset_tokens=self._reset_tokens,
+            reset_thread=self._reset_thread,
+            current_thread_id=self._current_thread_id,
+            current_context_tokens=self._current_context_tokens,
+            open_model_selector=self._open_model_selector,
+            switch_model=self._switch_model,
+            model_controller=self._model_controller,
+            available_tool_names=self._available_tool_names,
+        )
+        handled = await self._command_registry.dispatch(context)
+        if not handled:
+            await self._mount_user_text(command)
+            await self._mount_system_text(f"Unknown command: {context.normalized}")
 
     async def _handle_user_message(self, message: str) -> None:
         """Handle a user message to send to the agent.
@@ -636,6 +665,7 @@ class DeepAgentsApp(App):
             if self._chat_input:
                 self._chat_input.set_cursor_active(active=False)
                 self._chat_input.set_submit_enabled(enabled=False)
+                self._chat_input.set_prompt_active(active=False)
 
             # Use run_worker to avoid blocking the main event loop
             # This allows the UI to remain responsive during agent execution
@@ -645,8 +675,9 @@ class DeepAgentsApp(App):
             )
         else:
             await self._mount_message(
-                SystemMessage("Agent not configured. Run with --agent flag or use standalone mode.")
+                SystemMessage("No active model configured. Use /model to select one.")
             )
+            await self._open_model_selector()
 
     async def _run_agent_task(self, message: str) -> None:
         """Run the agent task in a background worker.
@@ -680,6 +711,7 @@ class DeepAgentsApp(App):
         if self._chat_input:
             self._chat_input.set_cursor_active(active=True)
             self._chat_input.set_submit_enabled(enabled=True)
+            self._chat_input.set_prompt_active(active=True)
 
         # Ensure token display is restored (in case of early cancellation)
         if self._token_tracker:
@@ -785,12 +817,10 @@ class DeepAgentsApp(App):
         Args:
             widget: The message widget to mount
         """
-        await self._remove_spacer()
         messages = self.query_one("#messages", Container)
         await messages.mount(widget)
-        # Scroll to keep input bar visible
-        input_container = self.query_one("#bottom-app-container", Container)
-        input_container.scroll_visible()
+        # Recalculate spacer after layout settles so content stays bottom-aligned
+        self.call_after_refresh(self._resize_spacer)
 
     async def _clear_messages(self) -> None:
         """Clear the messages area."""
@@ -830,7 +860,7 @@ class DeepAgentsApp(App):
             self.notify("Press Ctrl+C again to quit", timeout=3)
 
     def action_interrupt(self) -> None:
-        """Handle escape key - interrupt agent or reject approval.
+        """Handle escape key - interrupt agent, reject approval, or dismiss modal.
 
         This is the primary way to stop a running agent.
         """
@@ -842,6 +872,12 @@ class DeepAgentsApp(App):
         # If approval menu is active, reject it
         if self._pending_approval_widget:
             self._pending_approval_widget.action_select_reject()
+            return
+
+        # If model selector (or any modal) is open, dismiss it
+        if self._model_controller.model_selector_open:
+            self._model_controller.set_model_selector_open(is_open=False)
+            self.screen.dismiss(None)
 
     def action_quit_app(self) -> None:
         """Handle quit action (Ctrl+D)."""
@@ -934,6 +970,7 @@ async def run_textual_app(
     agent: Pregel | None = None,
     assistant_id: str | None = None,
     backend: Any = None,  # noqa: ANN401  # CompositeBackend
+    agent_builder: Any = None,
     auto_approve: bool = False,
     cwd: str | Path | None = None,
     thread_id: str | None = None,
@@ -945,6 +982,7 @@ async def run_textual_app(
         agent: Pre-configured LangGraph agent (optional)
         assistant_id: Agent identifier for memory storage
         backend: Backend for file operations
+        agent_builder: Optional callback to rebuild the agent for a new model
         auto_approve: Whether to start with auto-approve enabled
         cwd: Current working directory to display
         thread_id: Optional thread ID for session persistence
@@ -954,6 +992,7 @@ async def run_textual_app(
         agent=agent,
         assistant_id=assistant_id,
         backend=backend,
+        agent_builder=agent_builder,
         auto_approve=auto_approve,
         cwd=cwd,
         thread_id=thread_id,

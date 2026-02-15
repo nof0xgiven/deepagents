@@ -62,17 +62,17 @@ class LoadingWidget(Static):
 
     LoadingWidget .loading-spinner {
         width: auto;
-        color: $warning;
+        color: #71717a;
     }
 
     LoadingWidget .loading-status {
         width: auto;
-        color: $warning;
+        color: #71717a;
     }
 
     LoadingWidget .loading-hint {
         width: auto;
-        color: $text-muted;
+        color: #3f3f46;
         margin-left: 1;
     }
     """
@@ -117,7 +117,7 @@ class LoadingWidget(Static):
 
         if self._spinner_widget:
             frame = self._spinner.next_frame()
-            self._spinner_widget.update(f"[#FFD800]{frame}[/]")
+            self._spinner_widget.update(f"[#71717a]{frame}[/]")
 
         if self._hint_widget and self._start_time is not None:
             elapsed = int(time() - self._start_time)

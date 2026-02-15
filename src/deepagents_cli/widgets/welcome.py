@@ -7,7 +7,7 @@ from typing import Any
 
 from textual.widgets import Static
 
-from deepagents_cli.config import DEEP_AGENTS_ASCII, settings
+from deepagents_cli.config import settings
 
 
 class WelcomeBanner(Static):
@@ -16,15 +16,13 @@ class WelcomeBanner(Static):
     DEFAULT_CSS = """
     WelcomeBanner {
         height: auto;
-        padding: 1;
-        margin-bottom: 1;
+        padding: 3 3;
     }
     """
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the welcome banner."""
-        # Use the same blue color as the primary UI theme (#00AEEF)
-        banner_text = f"[bold #00AEEF]{DEEP_AGENTS_ASCII}[/bold #00AEEF]\n"
+        banner_text = "[#e4e4e7]deepagents[/#e4e4e7]  [#3f3f46]ready[/#3f3f46]\n\n"
 
         # Show LangSmith status if tracing is enabled
         langsmith_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
@@ -38,8 +36,7 @@ class WelcomeBanner(Static):
                 or os.environ.get("LANGSMITH_PROJECT")
                 or "default"
             )
-            banner_text += f"[#00AEEF]✓[/#00AEEF] LangSmith tracing: [cyan]'{project}'[/cyan]\n"
+            banner_text += f"[#3f3f46]tracing: {project}[/#3f3f46]\n"
 
-        banner_text += "[#00AEEF]Ready to code! What would you like to build?[/#00AEEF]\n"
-        banner_text += "[dim]Enter send • Ctrl+J newline • @ files • / commands[/dim]"
+        banner_text += "[#3f3f46]enter send · ctrl+j newline · @ files · / commands[/#3f3f46]"
         super().__init__(banner_text, **kwargs)

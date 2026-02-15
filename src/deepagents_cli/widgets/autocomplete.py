@@ -1,7 +1,6 @@
-"""Autocomplete system for @ mentions and / commands.
+"""Autocomplete system for / commands and @ file mentions.
 
-This is a custom implementation that handles trigger-based completion
-for slash commands (/) and file mentions (@).
+Provides slash-command completion and fuzzy file completion triggered by @.
 """
 
 from __future__ import annotations
@@ -16,68 +15,53 @@ if TYPE_CHECKING:
     from textual import events
 
 
+# ---------------------------------------------------------------------------
+# Result enum
+# ---------------------------------------------------------------------------
+
+
 class CompletionResult(StrEnum):
     """Result of handling a key event in the completion system."""
 
     IGNORED = "ignored"  # Key not handled, let default behavior proceed
     HANDLED = "handled"  # Key handled, prevent default
-    SUBMIT = "submit"  # Key triggers submission (e.g., Enter on slash command)
+    SUBMIT = "submit"  # Key triggers submission
+
+
+# ---------------------------------------------------------------------------
+# Protocols (kept for type-checking only)
+# ---------------------------------------------------------------------------
 
 
 class CompletionView(Protocol):
-    """Protocol for views that can display completion suggestions."""
+    """View that can display completion suggestions."""
 
     def render_completion_suggestions(
         self, suggestions: list[tuple[str, str]], selected_index: int
-    ) -> None:
-        """Render the completion suggestions popup.
+    ) -> None: ...
 
-        Args:
-            suggestions: List of (label, description) tuples
-            selected_index: Index of currently selected item
-        """
-        ...
+    def clear_completion_suggestions(self) -> None: ...
 
-    def clear_completion_suggestions(self) -> None:
-        """Hide/clear the completion suggestions popup."""
-        ...
-
-    def replace_completion_range(self, start: int, end: int, replacement: str) -> None:
-        """Replace text in the input from start to end with replacement.
-
-        Args:
-            start: Start index in the input text
-            end: End index in the input text
-            replacement: Text to insert
-        """
-        ...
+    def replace_completion_range(self, start: int, end: int, replacement: str) -> None: ...
 
 
 class CompletionController(Protocol):
-    """Protocol for completion controllers."""
+    """Controller that provides completions."""
 
-    def can_handle(self, text: str, cursor_index: int) -> bool:
-        """Check if this controller can handle the current input state."""
-        ...
-
-    def on_text_changed(self, text: str, cursor_index: int) -> None:
-        """Called when input text changes."""
-        ...
-
-    def on_key(self, event: events.Key, text: str, cursor_index: int) -> CompletionResult:
-        """Handle a key event. Returns how the event was handled."""
-        ...
-
-    def reset(self) -> None:
-        """Reset/clear the completion state."""
-        ...
+    def can_handle(self, text: str, cursor_index: int) -> bool: ...
+    def on_text_changed(self, text: str, cursor_index: int) -> None: ...
+    def on_key(self, event: events.Key, text: str, cursor_index: int) -> CompletionResult: ...
+    def reset(self) -> None: ...
 
 
-# ============================================================================
-# Slash Command Completion
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
 
 SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/assemble", "Assemble Linear issue workflow"),
+    ("/model", "Select or switch the active model"),
+    ("/debug", "Debug model resolution and settings"),
     ("/help", "Show help"),
     ("/clear", "Clear chat and start new session"),
     ("/remember", "Update memory and skills from conversation"),
@@ -92,28 +76,33 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 MAX_SUGGESTIONS = 10
 
 
+# ---------------------------------------------------------------------------
+# SlashCommandController
+# ---------------------------------------------------------------------------
+
+
 class SlashCommandController:
-    """Controller for / slash command completion."""
+    """Completion controller for ``/`` slash commands.
 
-    def __init__(
-        self,
-        commands: list[tuple[str, str]],
-        view: CompletionView,
-    ) -> None:
-        """Initialize the slash command controller.
+    Retained for compatibility; ChatInput now owns slash-command UX.
+    """
 
-        Args:
-            commands: List of (command, description) tuples
-            view: View to render suggestions to
-        """
+    def __init__(self, commands: list[tuple[str, str]], view: CompletionView) -> None:
         self._commands = commands
         self._view = view
         self._suggestions: list[tuple[str, str]] = []
         self._selected_index = 0
 
     def can_handle(self, text: str, cursor_index: int) -> bool:  # noqa: ARG002
-        """Handle input that starts with /."""
-        return text.startswith("/")
+        """Active when the *entire* text is a (partial) slash command.
+
+        Returns ``False`` once a space appears after the command name, since
+        at that point the user is typing arguments, not the command itself.
+        """
+        if not text.startswith("/"):
+            return False
+        # If there's a space the command part is over
+        return " " not in text
 
     def reset(self) -> None:
         """Clear suggestions."""
@@ -124,24 +113,17 @@ class SlashCommandController:
 
     def on_text_changed(self, text: str, cursor_index: int) -> None:
         """Update suggestions when text changes."""
-        if cursor_index < 0 or cursor_index > len(text):
-            self.reset()
-            return
-
         if not self.can_handle(text, cursor_index):
             self.reset()
             return
 
-        # Get the search string (text after /)
         search = text[1:cursor_index].lower()
 
-        # Filter commands that match
         suggestions = [
-            (cmd, desc) for cmd, desc in self._commands if cmd.lower().startswith("/" + search)
-        ]
-
-        if len(suggestions) > MAX_SUGGESTIONS:
-            suggestions = suggestions[:MAX_SUGGESTIONS]
+            (cmd, desc)
+            for cmd, desc in self._commands
+            if cmd.lower().startswith("/" + search)
+        ][:MAX_SUGGESTIONS]
 
         if suggestions:
             self._suggestions = suggestions
@@ -150,66 +132,56 @@ class SlashCommandController:
         else:
             self.reset()
 
-    def on_key(  # noqa: PLR0911
-        self, event: events.Key, _text: str, cursor_index: int
-    ) -> CompletionResult:
+    def on_key(self, event: events.Key, _text: str, cursor_index: int) -> CompletionResult:
         """Handle key events for navigation and selection."""
         if not self._suggestions:
             return CompletionResult.IGNORED
 
-        match event.key:
-            case "tab":
-                if self._apply_selected_completion(cursor_index):
-                    return CompletionResult.HANDLED
-                return CompletionResult.IGNORED
-            case "enter":
-                if self._apply_selected_completion(cursor_index):
-                    return CompletionResult.SUBMIT
-                return CompletionResult.HANDLED
-            case "down":
-                self._move_selection(1)
-                return CompletionResult.HANDLED
-            case "up":
-                self._move_selection(-1)
-                return CompletionResult.HANDLED
-            case "escape":
-                self.reset()
-                return CompletionResult.HANDLED
-            case _:
-                return CompletionResult.IGNORED
+        key = event.key
+        if key == "tab":
+            self._apply_selected(cursor_index)
+            return CompletionResult.HANDLED
+        if key == "enter":
+            self._apply_selected(cursor_index)
+            return CompletionResult.SUBMIT
+        if key == "down":
+            self._move_selection(1)
+            return CompletionResult.HANDLED
+        if key == "up":
+            self._move_selection(-1)
+            return CompletionResult.HANDLED
+        if key == "escape":
+            self.reset()
+            return CompletionResult.HANDLED
+        return CompletionResult.IGNORED
 
     def _move_selection(self, delta: int) -> None:
         """Move selection up or down."""
         if not self._suggestions:
             return
-        count = len(self._suggestions)
-        self._selected_index = (self._selected_index + delta) % count
+        self._selected_index = (self._selected_index + delta) % len(self._suggestions)
         self._view.render_completion_suggestions(self._suggestions, self._selected_index)
 
-    def _apply_selected_completion(self, cursor_index: int) -> bool:
+    def _apply_selected(self, cursor_index: int) -> None:
         """Apply the currently selected completion."""
         if not self._suggestions:
-            return False
-
+            return
         command, _ = self._suggestions[self._selected_index]
-        # Replace from start to cursor with the command
         self._view.replace_completion_range(0, cursor_index, command)
         self.reset()
-        return True
 
 
-# ============================================================================
-# Fuzzy File Completion (from project root)
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Fuzzy file completion helpers
+# ---------------------------------------------------------------------------
 
-# Constants for fuzzy file completion
 _MAX_FALLBACK_FILES = 1000
 _MIN_FUZZY_RATIO = 0.4
 _MIN_FUZZY_SCORE = 15  # Minimum score to include in results
 
 
 def _find_project_root(start_path: Path) -> Path:
-    """Find git root or return start_path."""
+    """Walk up to find the nearest ``.git`` directory."""
     current = start_path.resolve()
     for parent in [current, *list(current.parents)]:
         if (parent / ".git").exists():
@@ -218,7 +190,7 @@ def _find_project_root(start_path: Path) -> Path:
 
 
 def _get_project_files(root: Path) -> list[str]:
-    """Get project files using git ls-files or fallback to glob."""
+    """List files via ``git ls-files`` with a glob fallback."""
     try:
         result = subprocess.run(
             ["git", "ls-files"],  # noqa: S607
@@ -230,12 +202,12 @@ def _get_project_files(root: Path) -> list[str]:
         )
         if result.returncode == 0:
             files = result.stdout.strip().split("\n")
-            return [f for f in files if f]  # Filter empty strings
+            return [f for f in files if f]
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         pass
 
-    # Fallback: simple glob (limited depth to avoid slowness)
-    files = []
+    # Fallback: limited-depth glob
+    files: list[str] = []
     try:
         for pattern in ["*", "*/*", "*/*/*", "*/*/*/*"]:
             for p in root.glob(pattern):
@@ -251,44 +223,38 @@ def _get_project_files(root: Path) -> list[str]:
 
 
 def _fuzzy_score(query: str, candidate: str) -> float:  # noqa: PLR0911
-    """Score a candidate against query. Higher = better match."""
+    """Score *candidate* against *query*. Higher is better."""
     query_lower = query.lower()
     candidate_lower = candidate.lower()
 
-    # Extract filename for matching (prioritize filename over full path)
     filename = candidate.rsplit("/", 1)[-1].lower()
     filename_start = candidate_lower.rfind("/") + 1
 
-    # Check filename first (higher priority)
+    # --- filename substring matches (highest priority) ---
     if query_lower in filename:
         idx = filename.find(query_lower)
-        # Bonus for being at start of filename
         if idx == 0:
             return 150 + (1 / len(candidate))
-        # Bonus for word boundary in filename
         if idx > 0 and filename[idx - 1] in "_-.":
             return 120 + (1 / len(candidate))
         return 100 + (1 / len(candidate))
 
-    # Check full path
+    # --- full-path substring matches ---
     if query_lower in candidate_lower:
         idx = candidate_lower.find(query_lower)
-        # At start of filename
         if idx == filename_start:
             return 80 + (1 / len(candidate))
-        # At word boundary in path
         if idx == 0 or candidate[idx - 1] in "/_-.":
             return 60 + (1 / len(candidate))
         return 40 + (1 / len(candidate))
 
-    # Fuzzy match on filename only (more relevant)
+    # --- fuzzy on filename ---
     filename_ratio = SequenceMatcher(None, query_lower, filename).ratio()
     if filename_ratio > _MIN_FUZZY_RATIO:
         return filename_ratio * 30
 
-    # Fallback: fuzzy on full path
-    ratio = SequenceMatcher(None, query_lower, candidate_lower).ratio()
-    return ratio * 15
+    # --- fuzzy on full path ---
+    return SequenceMatcher(None, query_lower, candidate_lower).ratio() * 15
 
 
 def _is_dotpath(path: str) -> bool:
@@ -297,48 +263,42 @@ def _is_dotpath(path: str) -> bool:
 
 
 def _path_depth(path: str) -> int:
-    """Get depth of path (number of / separators)."""
+    """Get depth of path (number of ``/`` separators)."""
     return path.count("/")
 
 
 def _fuzzy_search(
-    query: str, candidates: list[str], limit: int = 10, *, include_dotfiles: bool = False
+    query: str,
+    candidates: list[str],
+    limit: int = 10,
+    *,
+    include_dotfiles: bool = False,
 ) -> list[str]:
-    """Return top matches sorted by score.
-
-    Args:
-        query: Search query
-        candidates: List of file paths to search
-        limit: Max results to return
-        include_dotfiles: Whether to include dotfiles (default False)
-    """
-    # Filter dotfiles unless explicitly searching for them
+    """Return top *limit* matches sorted by score."""
     filtered = candidates if include_dotfiles else [c for c in candidates if not _is_dotpath(c)]
 
     if not query:
-        # Empty query: show root-level files first, sorted by depth then name
         sorted_files = sorted(filtered, key=lambda p: (_path_depth(p), p.lower()))
         return sorted_files[:limit]
 
-    scored = [(score, c) for c in filtered if (score := _fuzzy_score(query, c)) >= _MIN_FUZZY_SCORE]
+    scored = [
+        (score, c)
+        for c in filtered
+        if (score := _fuzzy_score(query, c)) >= _MIN_FUZZY_SCORE
+    ]
     scored.sort(key=lambda x: -x[0])
     return [c for _, c in scored[:limit]]
 
 
+# ---------------------------------------------------------------------------
+# FuzzyFileController
+# ---------------------------------------------------------------------------
+
+
 class FuzzyFileController:
-    """Controller for @ file completion with fuzzy matching from project root."""
+    """Completion controller for ``@`` file mentions with fuzzy matching."""
 
-    def __init__(
-        self,
-        view: CompletionView,
-        cwd: Path | None = None,
-    ) -> None:
-        """Initialize the fuzzy file controller.
-
-        Args:
-            view: View to render suggestions to
-            cwd: Starting directory to find project root from
-        """
+    def __init__(self, view: CompletionView, cwd: Path | None = None) -> None:
         self._view = view
         self._cwd = cwd or Path.cwd()
         self._project_root = _find_project_root(self._cwd)
@@ -346,30 +306,16 @@ class FuzzyFileController:
         self._selected_index = 0
         self._file_cache: list[str] | None = None
 
-    def _get_files(self) -> list[str]:
-        """Get cached file list or refresh."""
-        if self._file_cache is None:
-            self._file_cache = _get_project_files(self._project_root)
-        return self._file_cache
-
-    def refresh_cache(self) -> None:
-        """Force refresh of file cache."""
-        self._file_cache = None
-
     def can_handle(self, text: str, cursor_index: int) -> bool:
-        """Handle input that contains @ not followed by space."""
+        """Active when there is an ``@`` before the cursor with no spaces after it."""
         if cursor_index <= 0 or cursor_index > len(text):
             return False
-
         before_cursor = text[:cursor_index]
         if "@" not in before_cursor:
             return False
-
         at_index = before_cursor.rfind("@")
         if cursor_index <= at_index:
             return False
-
-        # Fragment from @ to cursor must not contain spaces
         fragment = before_cursor[at_index:cursor_index]
         return bool(fragment) and " " not in fragment
 
@@ -379,6 +325,10 @@ class FuzzyFileController:
             self._suggestions.clear()
             self._selected_index = 0
             self._view.clear_completion_suggestions()
+
+    def refresh_cache(self) -> None:
+        """Force-refresh the cached file list."""
+        self._file_cache = None
 
     def on_text_changed(self, text: str, cursor_index: int) -> None:
         """Update suggestions when text changes."""
@@ -399,120 +349,108 @@ class FuzzyFileController:
         else:
             self.reset()
 
+    def on_key(self, event: events.Key, text: str, cursor_index: int) -> CompletionResult:
+        """Handle key events for navigation and selection."""
+        if not self._suggestions:
+            return CompletionResult.IGNORED
+
+        key = event.key
+        if key in ("tab", "enter"):
+            if self._apply_selected(text, cursor_index):
+                return CompletionResult.HANDLED
+            return CompletionResult.IGNORED
+        if key == "down":
+            self._move_selection(1)
+            return CompletionResult.HANDLED
+        if key == "up":
+            self._move_selection(-1)
+            return CompletionResult.HANDLED
+        if key == "escape":
+            self.reset()
+            return CompletionResult.HANDLED
+        return CompletionResult.IGNORED
+
+    # -- private helpers -----------------------------------------------------
+
+    def _get_files(self) -> list[str]:
+        """Get cached file list or refresh."""
+        if self._file_cache is None:
+            self._file_cache = _get_project_files(self._project_root)
+        return self._file_cache
+
     def _get_fuzzy_suggestions(self, search: str) -> list[tuple[str, str]]:
         """Get fuzzy file suggestions."""
         files = self._get_files()
-        # Include dotfiles only if query starts with "."
         include_dots = search.startswith(".")
         matches = _fuzzy_search(search, files, limit=MAX_SUGGESTIONS, include_dotfiles=include_dots)
 
         suggestions: list[tuple[str, str]] = []
         for path in matches:
-            # Get file extension for type hint
             ext = Path(path).suffix.lower()
             type_hint = ext[1:] if ext else "file"
             suggestions.append((f"@{path}", type_hint))
-
         return suggestions
-
-    def on_key(  # noqa: PLR0911
-        self, event: events.Key, text: str, cursor_index: int
-    ) -> CompletionResult:
-        """Handle key events for navigation and selection."""
-        if not self._suggestions:
-            return CompletionResult.IGNORED
-
-        match event.key:
-            case "tab" | "enter":
-                if self._apply_selected_completion(text, cursor_index):
-                    return CompletionResult.HANDLED
-                return CompletionResult.IGNORED
-            case "down":
-                self._move_selection(1)
-                return CompletionResult.HANDLED
-            case "up":
-                self._move_selection(-1)
-                return CompletionResult.HANDLED
-            case "escape":
-                self.reset()
-                return CompletionResult.HANDLED
-            case _:
-                return CompletionResult.IGNORED
 
     def _move_selection(self, delta: int) -> None:
         """Move selection up or down."""
         if not self._suggestions:
             return
-        count = len(self._suggestions)
-        self._selected_index = (self._selected_index + delta) % count
+        self._selected_index = (self._selected_index + delta) % len(self._suggestions)
         self._view.render_completion_suggestions(self._suggestions, self._selected_index)
 
-    def _apply_selected_completion(self, text: str, cursor_index: int) -> bool:
+    def _apply_selected(self, text: str, cursor_index: int) -> bool:
         """Apply the currently selected completion."""
         if not self._suggestions:
             return False
-
         label, _ = self._suggestions[self._selected_index]
         before_cursor = text[:cursor_index]
         at_index = before_cursor.rfind("@")
-
         if at_index < 0:
             return False
-
-        # Replace from @ to cursor with the completion
         self._view.replace_completion_range(at_index, cursor_index, label)
         self.reset()
         return True
 
 
-# Keep old name as alias for backwards compatibility
+# Backwards-compat alias
 PathCompletionController = FuzzyFileController
 
 
-# ============================================================================
-# Multi-Completion Manager
-# ============================================================================
+# ---------------------------------------------------------------------------
+# MultiCompletionManager
+# ---------------------------------------------------------------------------
 
 
 class MultiCompletionManager:
-    """Manages multiple completion controllers, delegating to the active one."""
+    """Delegates to the first matching controller from an ordered list."""
 
     def __init__(self, controllers: list[CompletionController]) -> None:
-        """Initialize with a list of controllers.
-
-        Args:
-            controllers: List of completion controllers (checked in order)
-        """
         self._controllers = controllers
         self._active: CompletionController | None = None
 
     def on_text_changed(self, text: str, cursor_index: int) -> None:
-        """Handle text change, activating the appropriate controller."""
-        # Find the first controller that can handle this input
+        """Activate the first controller that can handle the current input."""
         candidate = None
-        for controller in self._controllers:
-            if controller.can_handle(text, cursor_index):
-                candidate = controller
+        for ctrl in self._controllers:
+            if ctrl.can_handle(text, cursor_index):
+                candidate = ctrl
                 break
 
-        # No controller can handle - reset if we had one active
         if candidate is None:
             if self._active is not None:
                 self._active.reset()
                 self._active = None
             return
 
-        # Switch to new controller if different
         if candidate is not self._active:
             if self._active is not None:
                 self._active.reset()
             self._active = candidate
 
-        # Let the active controller process the change
         candidate.on_text_changed(text, cursor_index)
 
     def on_key(self, event: events.Key, text: str, cursor_index: int) -> CompletionResult:
-        """Handle key event, delegating to active controller."""
+        """Delegate key event to the active controller."""
         if self._active is None:
             return CompletionResult.IGNORED
         return self._active.on_key(event, text, cursor_index)

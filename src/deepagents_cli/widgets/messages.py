@@ -27,17 +27,6 @@ class UserMessage(Static):
         height: auto;
         padding: 0 1;
         margin: 1 0;
-        background: $surface;
-        border-left: thick $primary;
-    }
-
-    UserMessage .user-prefix {
-        color: $primary;
-        text-style: bold;
-    }
-
-    UserMessage .user-content {
-        margin-left: 1;
     }
     """
 
@@ -55,8 +44,8 @@ class UserMessage(Static):
         """Compose the user message layout."""
         # Use Text object to combine styled prefix with unstyled user content
         text = Text()
-        text.append("> ", style="bold #00AEEF")
-        text.append(self._content)
+        text.append("> ", style="#3f3f46")
+        text.append(self._content, style="#e4e4e7")
         yield Static(text)
 
 
@@ -70,13 +59,14 @@ class AssistantMessage(Vertical):
     DEFAULT_CSS = """
     AssistantMessage {
         height: auto;
-        padding: 0 1;
+        padding: 1 2 0 2;
         margin: 1 0;
+        background: #151515;
     }
 
     AssistantMessage Markdown {
         padding: 0;
-        margin: 0;
+        margin: 0 0 -1 0;
     }
     """
 
@@ -164,18 +154,16 @@ class ToolCallMessage(Vertical):
     ToolCallMessage {
         height: auto;
         padding: 0 1;
-        margin: 1 0;
-        background: $surface;
-        border-left: thick $secondary;
+        margin: 0 0;
+        background: #151515;
     }
 
     ToolCallMessage .tool-header {
-        color: $secondary;
-        text-style: bold;
+        color: #71717a;
     }
 
     ToolCallMessage .tool-args {
-        color: $text-muted;
+        color: #3f3f46;
         margin-left: 2;
     }
 
@@ -184,44 +172,39 @@ class ToolCallMessage(Vertical):
     }
 
     ToolCallMessage .tool-status.pending {
-        color: $warning;
+        color: #71717a;
     }
 
     ToolCallMessage .tool-status.success {
-        color: $success;
+        color: #71717a;
     }
 
     ToolCallMessage .tool-status.error {
-        color: $error;
+        color: #ef4444;
     }
 
     ToolCallMessage .tool-status.rejected {
-        color: $warning;
+        color: #71717a;
     }
 
     ToolCallMessage .tool-output {
         margin-left: 2;
         margin-top: 1;
         padding: 1;
-        background: $surface-darken-1;
-        color: $text-muted;
+        background: #151515;
+        color: #71717a;
         max-height: 20;
         overflow-y: auto;
     }
 
     ToolCallMessage .tool-output-preview {
         margin-left: 2;
-        color: $text-muted;
+        color: #71717a;
     }
 
     ToolCallMessage .tool-output-hint {
         margin-left: 2;
-        color: $primary;
-        text-style: italic;
-    }
-
-    ToolCallMessage:hover {
-        background: $surface-lighten-1;
+        color: #3f3f46;
     }
     """
 
@@ -258,7 +241,7 @@ class ToolCallMessage(Vertical):
         """Compose the tool call message layout."""
         tool_label = format_tool_display(self._tool_name, self._args)
         yield Static(
-            f"[bold yellow]Tool:[/bold yellow] {tool_label}",
+            f"[#71717a]◆[/#71717a] {tool_label}",
             classes="tool-header",
         )
         args = self._filtered_args()
@@ -307,7 +290,7 @@ class ToolCallMessage(Vertical):
         self._output = error
         if self._status_widget:
             self._status_widget.add_class("error")
-            self._status_widget.update("[red]✗ Error[/red]")
+            self._status_widget.update("[#ef4444]✗[/#ef4444]")
             self._status_widget.display = True
         # Always show full error - errors should be visible
         self._expanded = True
@@ -318,7 +301,7 @@ class ToolCallMessage(Vertical):
         self._status = "rejected"
         if self._status_widget:
             self._status_widget.add_class("rejected")
-            self._status_widget.update("[yellow]✗ Rejected[/yellow]")
+            self._status_widget.update("[#71717a]✗ rejected[/#71717a]")
             self._status_widget.display = True
 
     def set_skipped(self) -> None:
@@ -326,7 +309,7 @@ class ToolCallMessage(Vertical):
         self._status = "skipped"
         if self._status_widget:
             self._status_widget.add_class("rejected")  # Use same styling as rejected
-            self._status_widget.update("[dim]- Skipped[/dim]")
+            self._status_widget.update("[#3f3f46]- skipped[/#3f3f46]")
             self._status_widget.display = True
 
     def toggle_output(self) -> None:
@@ -413,32 +396,26 @@ class DiffMessage(Static):
         height: auto;
         padding: 1;
         margin: 1 0;
-        background: $surface;
-        border: solid $primary;
     }
 
     DiffMessage .diff-header {
-        text-style: bold;
         margin-bottom: 1;
     }
 
     DiffMessage .diff-add {
-        color: #00AEEF;
-        background: #00AEEF20;
+        color: #4ade80;
     }
 
     DiffMessage .diff-remove {
-        color: #ef4444;
-        background: #ef444420;
+        color: #f87171;
     }
 
     DiffMessage .diff-context {
-        color: $text-muted;
+        color: #3f3f46;
     }
 
     DiffMessage .diff-hunk {
-        color: $secondary;
-        text-style: bold;
+        color: #71717a;
     }
     """
 
@@ -470,11 +447,8 @@ class ErrorMessage(Static):
     DEFAULT_CSS = """
     ErrorMessage {
         height: auto;
-        padding: 1;
+        padding: 0 1;
         margin: 1 0;
-        background: #7f1d1d;
-        color: white;
-        border-left: thick $error;
     }
     """
 
@@ -486,8 +460,8 @@ class ErrorMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to combine styled prefix with unstyled error content
-        text = Text("Error: ", style="bold red")
-        text.append(error)
+        text = Text("✗ ", style="#ef4444")
+        text.append(error, style="#ef4444")
         super().__init__(text, **kwargs)
 
 
@@ -499,8 +473,7 @@ class SystemMessage(Static):
         height: auto;
         padding: 0 1;
         margin: 1 0;
-        color: $text-muted;
-        text-style: italic;
+        color: #3f3f46;
     }
     """
 
@@ -512,4 +485,4 @@ class SystemMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to safely render message without markup parsing
-        super().__init__(Text(message, style="dim italic"), **kwargs)
+        super().__init__(Text(message, style="#3f3f46"), **kwargs)

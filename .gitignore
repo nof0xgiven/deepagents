@@ -1,2 +1,6 @@
 .env
 .venv
+.deepagents/
+__pycache__/
+*.pyc
+.superset/

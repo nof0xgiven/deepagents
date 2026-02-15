@@ -1,21 +1,27 @@
-/* DeepAgents CLI Textual Stylesheet */
+/* Ghost Glass — DeepAgents CLI */
 
-/* Define layers for z-ordering */
 Screen {
     layout: vertical;
-    layers: base autocomplete;
+    layers: base autocomplete modal;
+    background: #111111;
+    scrollbar-color: #3f3f46;
+    scrollbar-color-hover: #71717a;
+    scrollbar-color-active: #71717a;
+    scrollbar-background: #111111;
+    scrollbar-background-hover: #111111;
+    scrollbar-background-active: #111111;
+    scrollbar-size-vertical: 1;
 }
 
-/* Main content goes on base layer by default */
-
-/* Chat area - main scrollable messages area */
+/* Chat area */
 #chat {
     height: 1fr;
-    padding: 1 2;
-    background: $background;
+    padding: 2 3;
+    background: #111111;
+    scrollbar-color: #111111;
+    scrollbar-background: #111111;
 }
 
-/* Spacer fills remaining viewport below input */
 #chat-spacer {
     height: auto;
 }
@@ -24,6 +30,7 @@ Screen {
 #welcome-banner {
     height: auto;
     margin-bottom: 1;
+    padding: 2 0;
 }
 
 /* Messages area */
@@ -31,11 +38,11 @@ Screen {
     height: auto;
 }
 
-/* Bottom app container - holds ChatInput (now inside scroll) */
+/* Bottom app container */
 #bottom-app-container {
     height: auto;
     margin-top: 1;
-    padding: 0 1;
+    padding: 0 0;
 }
 
 /* Input area */
@@ -45,40 +52,39 @@ Screen {
     max-height: 12;
 }
 
-/* Approval Menu - inline in messages area */
+/* Approval Menu */
 .approval-menu {
     height: auto;
     margin: 1 0;
-    padding: 0 1;
-    background: $surface;
-    border: solid $warning;
+    padding: 1 2;
+    background: #1c1c1c;
 }
 
 .approval-menu .approval-title {
-    text-style: bold;
-    color: $warning;
+    color: #e4e4e7;
     margin-bottom: 0;
 }
 
 .approval-menu .approval-info {
     height: auto;
-    color: $text-muted;
+    color: #71717a;
     margin-bottom: 1;
 }
 
 .approval-menu .approval-option {
     height: 1;
     padding: 0 1;
+    color: #71717a;
 }
 
 .approval-menu .approval-option-selected {
-    background: $primary;
-    text-style: bold;
+    background: #151515;
+    color: #e4e4e7;
+    border-left: thick #00AEEF;
 }
 
 .approval-menu .approval-help {
-    color: $text-muted;
-    text-style: italic;
+    color: #3f3f46;
     margin-top: 0;
     margin-bottom: 0;
 }
@@ -87,7 +93,7 @@ Screen {
 #status-bar {
     height: 1;
     dock: bottom;
-    margin-bottom: 1;
+    margin-bottom: 0;
 }
 
 /* Tool approval widgets */
@@ -96,80 +102,169 @@ Screen {
 }
 
 .approval-file-path {
-    color: $primary;
-    text-style: bold;
+    color: #e4e4e7;
 }
 
 .approval-description {
-    color: $text-muted;
+    color: #71717a;
 }
 
 /* Diff styling */
 .diff-header {
     height: auto;
-    color: $text-muted;
+    color: #71717a;
 }
 
 .diff-removed {
     height: auto;
-    color: #ff8787;
-    background: #4a2020;
+    color: #f87171;
     padding: 0 1;
 }
 
 .diff-added {
     height: auto;
-    color: #8ce99a;
-    background: #1e4620;
+    color: #4ade80;
     padding: 0 1;
 }
 
 .diff-range {
     height: auto;
-    color: $primary;
-    text-style: bold;
+    color: #71717a;
 }
 
 .diff-context {
     height: auto;
-    color: $text-muted;
+    color: #3f3f46;
     padding: 0 1;
 }
 
-/* Separator line between tool details and options */
+/* Separator */
 .approval-menu .approval-separator {
     height: 1;
-    color: $warning;
+    color: #3f3f46;
     margin: 0;
 }
 
-/* Scrollable tool info area in approval menu */
+/* Scrollable tool info */
 .approval-menu .tool-info-scroll {
     height: 10;
     margin-top: 0;
 }
 
-/* Inner container for tool info - allows content to expand for scrolling */
 .approval-menu .tool-info-container {
     height: auto;
 }
 
-/* Options container with background */
+/* Options container */
 .approval-menu .approval-options-container {
     height: auto;
-    background: $surface-darken-1;
+    background: #1c1c1c;
     padding: 0 1;
     margin-top: 0;
 }
 
-/* Completion popup styling (used by ChatInput) - appears BELOW input */
+/* Slash command menu - above input */
+#slash-command-menu {
+    display: none;
+    width: 100%;
+    height: auto;
+    max-height: 14;
+    padding: 0;
+    margin: 0 0 0 0;
+    background: #18181b;
+    border-top: solid #27272a;
+    border-bottom: solid #27272a;
+    scrollbar-size-vertical: 0;
+    overflow-y: auto;
+}
+
+#slash-command-menu .slash-command-row {
+    height: 1;
+    padding: 0 2;
+    color: #a1a1aa;
+    background: #18181b;
+}
+
+#slash-command-menu .slash-command-row.selected {
+    color: #e4e4e7;
+    background: #27272a;
+    text-style: bold;
+}
+
+/* Completion popup - clean and spacious */
 #completion-popup {
     height: auto;
-    max-height: 12;
-    width: 100%;
-    margin-left: 3;
-    margin-top: 0;
-    padding: 0;
-    background: $surface;
-    color: $text;
+    max-height: 10;
+    width: 1fr;
+    margin-left: 5;
+    margin-right: 2;
+    margin-bottom: 1;
+    background: #18181b;
+    color: #e4e4e7;
+    border: solid #27272a;
+    padding: 1 2;
+    layer: autocomplete;
+}
+
+/* Model selector modal - ghost glass */
+ModelSelectorScreen {
+    align: center middle;
+    background: #09090b 85%;
+}
+
+#model-selector-panel {
+    layer: modal;
+    width: 90;
+    height: 32;
+    background: #18181b;
+    border: solid #27272a;
+    padding: 1 2;
+}
+
+#model-selector-title {
+    color: #e4e4e7;
+    margin-bottom: 1;
+    text-align: center;
+    text-style: bold;
+}
+
+.model-selector-input {
+    dock: top;
+    margin-bottom: 1;
+    background: #27272a;
+    border: solid #3f3f46;
+    color: #e4e4e7;
+    height: 3;
+    padding: 0 1;
+}
+
+.model-selector-input:focus {
+    border: solid #00AEEF;
+}
+
+#model-selector-list {
+    height: 1fr;
+    scrollbar-color: #3f3f46;
+    scrollbar-background: #18181b;
+    scrollbar-size-vertical: 1;
+    background: #18181b;
+    border: none;
+}
+
+#model-selector-list:focus {
+    border: none;
+}
+
+#model-selector-list > .option-list--option-highlighted {
+    background: #27272a;
+    color: #00AEEF;
+    text-style: bold;
+}
+
+#model-selector-help {
+    dock: bottom;
+    color: #52525b;
+    margin-top: 1;
+    text-align: center;
+    height: 1;
 }

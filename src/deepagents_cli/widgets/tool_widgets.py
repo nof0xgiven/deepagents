@@ -92,7 +92,7 @@ class EditFileApprovalWidget(ToolApprovalWidget):
 
         # File path header with stats
         stats_str = self._format_stats(additions, deletions)
-        yield Static(f"[bold cyan]File:[/bold cyan] {file_path}  {stats_str}")
+        yield Static(f"[#e4e4e7]File:[/#e4e4e7] {file_path}  {stats_str}")
         yield Static("")
 
         if not diff_lines and not old_string and not new_string:
@@ -125,9 +125,9 @@ class EditFileApprovalWidget(ToolApprovalWidget):
         """Format stats as colored string."""
         parts = []
         if additions:
-            parts.append(f"[#00AEEF]+{additions}[/#00AEEF]")
+            parts.append(f"[#4ade80]+{additions}[/#4ade80]")
         if deletions:
-            parts.append(f"[red]-{deletions}[/red]")
+            parts.append(f"[#f87171]-{deletions}[/#f87171]")
         return " ".join(parts)
 
     def _render_diff_lines_only(self, diff_lines: list[str]) -> ComposeResult:
@@ -150,12 +150,12 @@ class EditFileApprovalWidget(ToolApprovalWidget):
     def _render_strings_only(self, old_string: str, new_string: str) -> ComposeResult:
         """Render old/new strings without returning stats."""
         if old_string:
-            yield Static("[bold red]Removing:[/bold red]")
+            yield Static("[#71717a]Removing:[/#71717a]")
             yield from self._render_string_lines(old_string, is_addition=False)
             yield Static("")
 
         if new_string:
-            yield Static("[bold #00AEEF]Adding:[/bold #00AEEF]")
+            yield Static("[#71717a]Adding:[/#71717a]")
             yield from self._render_string_lines(new_string, is_addition=True)
 
     def _render_diff_line(self, line: str) -> Static | None:
@@ -163,11 +163,11 @@ class EditFileApprovalWidget(ToolApprovalWidget):
         content = _escape_markup(line[1:] if len(line) > 1 else "")
 
         if line.startswith("-"):
-            return Static(f"[on #4a2020][#ff8787]- {content}[/#ff8787][/on #4a2020]")
+            return Static(f"[#f87171]- {content}[/#f87171]")
         if line.startswith("+"):
-            return Static(f"[on #1e4620][#8ce99a]+ {content}[/#8ce99a][/on #1e4620]")
+            return Static(f"[#4ade80]+ {content}[/#4ade80]")
         if line.startswith(" "):
-            return Static(f"[#aaaaaa]  {content}[/#aaaaaa]")
+            return Static(f"[#3f3f46]  {content}[/#3f3f46]")
         if line.strip():
             return Static(line, markup=False)
         return None
@@ -175,16 +175,16 @@ class EditFileApprovalWidget(ToolApprovalWidget):
     def _render_string_lines(self, text: str, *, is_addition: bool) -> ComposeResult:
         """Render lines from a string with appropriate styling."""
         lines = text.split("\n")
-        style = "[on #1e4620][#8ce99a]+" if is_addition else "[on #4a2020][#ff8787]-"
-        end_style = "[/#8ce99a][/on #1e4620]" if is_addition else "[/#ff8787][/on #4a2020]"
+        color = "#4ade80" if is_addition else "#f87171"
+        prefix = "+" if is_addition else "-"
 
         for line in lines[:_MAX_PREVIEW_LINES]:
             escaped = _escape_markup(line)
-            yield Static(f"{style} {escaped}{end_style}")
+            yield Static(f"[{color}]{prefix} {escaped}[/{color}]")
 
         if len(lines) > _MAX_PREVIEW_LINES:
             remaining = len(lines) - _MAX_PREVIEW_LINES
-            yield Static(f"[dim]... ({remaining} more lines)[/dim]")
+            yield Static(f"[#3f3f46]... ({remaining} more lines)[/#3f3f46]")
 
 
 class FastApplyApprovalWidget(ToolApprovalWidget):
@@ -196,8 +196,8 @@ class FastApplyApprovalWidget(ToolApprovalWidget):
         code_edit = self.data.get("code_edit", "")
         model = self.data.get("model", "auto")
 
-        yield Static(f"[bold cyan]File:[/bold cyan] {file_path}")
-        yield Static(f"[bold cyan]Model:[/bold cyan] {model}")
+        yield Static(f"[#e4e4e7]File:[/#e4e4e7] {file_path}")
+        yield Static(f"[#71717a]Model:[/#71717a] {model}")
         if instruction:
             yield Static("")
             yield Static("[bold]Instruction:[/bold]")

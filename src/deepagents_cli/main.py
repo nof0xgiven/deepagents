@@ -27,6 +27,8 @@ from deepagents_cli.agent import create_cli_agent, list_agents, reset_agent
 
 # CRITICAL: Import config FIRST to set LANGSMITH_PROJECT before LangChain loads
 from deepagents_cli.config import (
+    ModelConfigurationError,
+    NoModelSelectedError,
     console,
     create_model,
     settings,
@@ -37,6 +39,7 @@ from deepagents_cli.sessions import (
     delete_thread_command,
     generate_thread_id,
     get_checkpointer,
+    get_store,
     get_most_recent,
     get_thread_agent,
     list_threads_command,
@@ -157,8 +160,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--model",
-        help="Model to use (e.g., claude-sonnet-4-5-20250929, gpt-5-mini). "
-        "Provider is auto-detected from model name.",
+        help="Model alias or provider:model-id. "
+        "If omitted, uses model.active from settings.json.",
     )
     parser.add_argument(
         "--reasoning",
@@ -199,7 +202,38 @@ def parse_args() -> argparse.Namespace:
         "--sandbox-setup",
         help="Path to setup script to run in sandbox after creation",
     )
+    parser.add_argument(
+        "--extensions",
+        action="append",
+        help="Load extension by path or module:func (repeatable or comma-separated)",
+    )
+    parser.add_argument(
+        "--extensions-only",
+        action="store_true",
+        help="Only load explicitly listed extensions (skip auto-discovery)",
+    )
+    parser.add_argument(
+        "--no-extensions",
+        dest="extensions_disabled",
+        action="store_true",
+        help="Disable all extensions",
+    )
     return parser.parse_args()
+
+
+def _parse_extension_entries(entries: list[str] | None) -> list[str]:
+    if not entries:
+        return []
+    parsed: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        for part in str(entry).split(","):
+            value = part.strip()
+            if not value or value in seen:
+                continue
+            parsed.append(value)
+            seen.add(value)
+    return parsed
 
 
 async def run_textual_cli_async(
@@ -214,6 +248,9 @@ async def run_textual_cli_async(
     thread_id: str | None = None,
     is_resumed: bool = False,
     initial_prompt: str | None = None,
+    extensions: list[str] | None = None,
+    extensions_only: bool = False,
+    extensions_disabled: bool = False,
 ) -> None:
     """Run the Textual CLI interface (async version).
 
@@ -228,14 +265,37 @@ async def run_textual_cli_async(
         thread_id: Thread ID to use (new or resumed)
         is_resumed: Whether this is a resumed session
         initial_prompt: Optional prompt to auto-submit when session starts
+        extensions: Explicit extension entries to load
+        extensions_only: If True, skip auto-discovered extensions
+        extensions_disabled: If True, disable all extensions
     """
     from deepagents_cli.app import run_textual_app
 
-    model = create_model(
-        model_name,
-        reasoning_effort=reasoning_effort,
-        service_tier=service_tier,
-    )
+    def build_agent(
+        model_name_override: str | None,
+        *,
+        auto_approve_override: bool,
+        reasoning_effort_override: str | None = None,
+        service_tier_override: str | None = None,
+    ) -> tuple[Pregel, Any]:
+        model = create_model(
+            model_name_override,
+            reasoning_effort=reasoning_effort_override or reasoning_effort,
+            service_tier=service_tier_override or service_tier,
+        )
+        return create_cli_agent(
+            model=model,
+            assistant_id=assistant_id,
+            tools=tools,
+            sandbox=sandbox_backend,
+            sandbox_type=sandbox_type if sandbox_type != "none" else None,
+            auto_approve=auto_approve_override,
+            checkpointer=checkpointer,
+            store=store,
+            extensions=extensions,
+            extensions_only=extensions_only,
+            extensions_disabled=extensions_disabled,
+        )
 
     # Show thread info
     if is_resumed:
@@ -245,60 +305,68 @@ async def run_textual_cli_async(
 
     # Use async context manager for checkpointer
     async with get_checkpointer() as checkpointer:
-        async with open_mcp_tools() as mcp_tools:
-            # Create agent with conditional tools
-            tools = [http_request, fetch_url, warp_grep, fast_apply]
-            if settings.has_tavily:
-                tools.append(web_search)
-            if mcp_tools:
-                tools.extend(mcp_tools)
+        async with get_store() as store:
+            async with open_mcp_tools() as mcp_tools:
+                # Create agent with conditional tools
+                tools = [http_request, fetch_url, warp_grep, fast_apply]
+                if settings.has_tavily:
+                    tools.append(web_search)
+                if mcp_tools:
+                    tools.extend(mcp_tools)
 
-            # Handle sandbox mode
-            sandbox_backend = None
-            sandbox_cm = None
+                # Handle sandbox mode
+                sandbox_backend = None
+                sandbox_cm = None
 
-            if sandbox_type != "none":
+                if sandbox_type != "none":
+                    try:
+                        # Create sandbox context manager but keep it open
+                        sandbox_cm = create_sandbox(sandbox_type, sandbox_id=sandbox_id)
+                        sandbox_backend = sandbox_cm.__enter__()
+                    except (ImportError, ValueError, RuntimeError, NotImplementedError) as e:
+                        console.print()
+                        console.print("[red]❌ Sandbox creation failed[/red]")
+                        console.print(Text(str(e), style="dim"))
+                        sys.exit(1)
+
                 try:
-                    # Create sandbox context manager but keep it open
-                    sandbox_cm = create_sandbox(sandbox_type, sandbox_id=sandbox_id)
-                    sandbox_backend = sandbox_cm.__enter__()
-                except (ImportError, ValueError, RuntimeError, NotImplementedError) as e:
-                    console.print()
-                    console.print("[red]❌ Sandbox creation failed[/red]")
-                    console.print(Text(str(e), style="dim"))
+                    agent = None
+                    composite_backend = None
+                    try:
+                        agent, composite_backend = build_agent(
+                            model_name,
+                            auto_approve_override=auto_approve,
+                        )
+                    except NoModelSelectedError:
+                        agent = None
+                        composite_backend = None
+
+                    # Run Textual app
+                    await run_textual_app(
+                        agent=agent,
+                        assistant_id=assistant_id,
+                        backend=composite_backend,
+                        agent_builder=build_agent,
+                        auto_approve=auto_approve,
+                        cwd=Path.cwd(),
+                        thread_id=thread_id,
+                        initial_prompt=initial_prompt,
+                    )
+                except ModelConfigurationError as e:
+                    error_text = Text("❌ Failed to configure model: ", style="red")
+                    error_text.append(str(e))
+                    console.print(error_text)
                     sys.exit(1)
-
-            try:
-                agent, composite_backend = create_cli_agent(
-                    model=model,
-                    assistant_id=assistant_id,
-                    tools=tools,
-                    sandbox=sandbox_backend,
-                    sandbox_type=sandbox_type if sandbox_type != "none" else None,
-                    auto_approve=auto_approve,
-                    checkpointer=checkpointer,
-                )
-
-                # Run Textual app
-                await run_textual_app(
-                    agent=agent,
-                    assistant_id=assistant_id,
-                    backend=composite_backend,
-                    auto_approve=auto_approve,
-                    cwd=Path.cwd(),
-                    thread_id=thread_id,
-                    initial_prompt=initial_prompt,
-                )
-            except Exception as e:
-                error_text = Text("❌ Failed to create agent: ", style="red")
-                error_text.append(str(e))
-                console.print(error_text)
-                sys.exit(1)
-            finally:
-                # Clean up sandbox if we created one
-                if sandbox_cm is not None:
-                    with contextlib.suppress(Exception):
-                        sandbox_cm.__exit__(None, None, None)
+                except Exception as e:
+                    error_text = Text("❌ Failed to create agent: ", style="red")
+                    error_text.append(str(e))
+                    console.print(error_text)
+                    sys.exit(1)
+                finally:
+                    # Clean up sandbox if we created one
+                    if sandbox_cm is not None:
+                        with contextlib.suppress(Exception):
+                            sandbox_cm.__exit__(None, None, None)
 
 
 def cli_main() -> None:
@@ -317,6 +385,9 @@ def cli_main() -> None:
 
     try:
         args = parse_args()
+        extensions = _parse_extension_entries(getattr(args, "extensions", None))
+        extensions_only = bool(getattr(args, "extensions_only", False))
+        extensions_disabled = bool(getattr(args, "extensions_disabled", False))
 
         if args.command == "help":
             show_help()
@@ -386,20 +457,23 @@ def cli_main() -> None:
                 thread_id = generate_thread_id()
 
             # Run Textual CLI
-                asyncio.run(
-                    run_textual_cli_async(
-                        assistant_id=args.agent,
-                        auto_approve=args.auto_approve,
-                        sandbox_type=args.sandbox,
-                        sandbox_id=args.sandbox_id,
-                        model_name=getattr(args, "model", None),
-                        reasoning_effort=getattr(args, "reasoning_effort", None),
-                        service_tier=getattr(args, "service_tier", None),
-                        thread_id=thread_id,
-                        is_resumed=is_resumed,
-                        initial_prompt=getattr(args, "initial_prompt", None),
-                    )
+            asyncio.run(
+                run_textual_cli_async(
+                    assistant_id=args.agent,
+                    auto_approve=args.auto_approve,
+                    sandbox_type=args.sandbox,
+                    sandbox_id=args.sandbox_id,
+                    model_name=args.model,
+                    reasoning_effort=args.reasoning_effort,
+                    service_tier=args.service_tier,
+                    thread_id=thread_id,
+                    is_resumed=is_resumed,
+                    initial_prompt=args.initial_prompt,
+                    extensions=extensions,
+                    extensions_only=extensions_only,
+                    extensions_disabled=extensions_disabled,
                 )
+            )
     except KeyboardInterrupt:
         # Clean exit on Ctrl+C - suppress ugly traceback
         console.print("\n\n[yellow]Interrupted[/yellow]")

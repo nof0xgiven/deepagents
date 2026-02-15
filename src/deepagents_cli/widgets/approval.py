@@ -84,7 +84,7 @@ class ApprovalMenu(Container):
         """
         # Title
         yield Static(
-            f">>> {self._tool_name} Requires Approval <<<",
+            f"[#e4e4e7]{self._tool_name}[/#e4e4e7] [#71717a]requires approval[/#71717a]",
             classes="approval-title",
         )
 
@@ -107,7 +107,7 @@ class ApprovalMenu(Container):
 
         # Help text at the very bottom
         yield Static(
-            "↑/↓ navigate • Enter select • y/n/a quick keys",
+            "↑/↓ navigate · enter select · y/n/a",
             classes="approval-help",
         )
 
@@ -135,9 +135,9 @@ class ApprovalMenu(Container):
     def _update_options(self) -> None:
         """Update option widgets based on selection."""
         options = [
-            "1. Approve (y)",
-            "2. Reject (n)",
-            "3. Auto-approve all this session (a)",
+            "1. approve (y)",
+            "2. reject (n)",
+            "3. auto-approve all (a)",
         ]
 
         for i, (text, widget) in enumerate(zip(options, self._option_widgets, strict=True)):

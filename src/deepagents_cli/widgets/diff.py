@@ -56,9 +56,9 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
     # Add stats header
     stats_parts = []
     if additions:
-        stats_parts.append(f"[#00AEEF]+{additions}[/#00AEEF]")
+        stats_parts.append(f"[#4ade80]+{additions}[/#4ade80]")
     if deletions:
-        stats_parts.append(f"[red]-{deletions}[/red]")
+        stats_parts.append(f"[#f87171]-{deletions}[/#f87171]")
     if stats_parts:
         formatted.append(" ".join(stats_parts))
         formatted.append("")  # Blank line after stats
@@ -85,30 +85,26 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
         escaped_content = _escape_markup(content)
 
         if line.startswith("-"):
-            # Deletion - red gutter bar, subtle red background
             formatted.append(
-                f"[red bold]▌[/red bold][dim]{old_num:>{width}}[/dim] "
-                f"[on #2d1515]{escaped_content}[/on #2d1515]"
+                f"[#3f3f46]{old_num:>{width}}[/#3f3f46] "
+                f"[#f87171]-{escaped_content}[/#f87171]"
             )
             old_num += 1
             line_count += 1
         elif line.startswith("+"):
-            # Addition - blue gutter bar, subtle blue background
             formatted.append(
-                f"[#00AEEF bold]▌[/#00AEEF bold][dim]{new_num:>{width}}[/dim] "
-                f"[on #0b2a3a]{escaped_content}[/on #0b2a3a]"
+                f"[#3f3f46]{new_num:>{width}}[/#3f3f46] "
+                f"[#4ade80]+{escaped_content}[/#4ade80]"
             )
             new_num += 1
             line_count += 1
         elif line.startswith(" "):
-            # Context line - dim gutter
-            formatted.append(f"[dim]│{old_num:>{width}}[/dim]  {escaped_content}")
+            formatted.append(f"[#3f3f46]{old_num:>{width}}[/#3f3f46]  {escaped_content}")
             old_num += 1
             new_num += 1
             line_count += 1
         elif line.strip() == "...":
-            # Truncation marker
-            formatted.append("[dim]...[/dim]")
+            formatted.append("[#3f3f46]...[/#3f3f46]")
             line_count += 1
 
     return "\n".join(formatted)
@@ -121,13 +117,11 @@ class EnhancedDiff(Vertical):
     EnhancedDiff {
         height: auto;
         padding: 1;
-        background: $surface-darken-1;
-        border: round $primary;
+        background: #151515;
     }
 
     EnhancedDiff .diff-title {
-        color: $primary;
-        text-style: bold;
+        color: #71717a;
         margin-bottom: 1;
     }
 
@@ -136,7 +130,7 @@ class EnhancedDiff(Vertical):
     }
 
     EnhancedDiff .diff-stats {
-        color: $text-muted;
+        color: #71717a;
         margin-top: 1;
     }
     """
@@ -179,7 +173,7 @@ class EnhancedDiff(Vertical):
 
     def compose(self) -> ComposeResult:
         """Compose the diff widget layout."""
-        yield Static(f"[bold cyan]═══ {self._title} ═══[/bold cyan]", classes="diff-title")
+        yield Static(f"[#71717a]{self._title}[/#71717a]", classes="diff-title")
 
         formatted = format_diff_textual(self._diff, self._max_lines)
         yield Static(formatted, classes="diff-content")
@@ -188,7 +182,7 @@ class EnhancedDiff(Vertical):
         if additions or deletions:
             stats_parts = []
             if additions:
-                stats_parts.append(f"[#00AEEF]+{additions}[/#00AEEF]")
+                stats_parts.append(f"[#4ade80]+{additions}[/#4ade80]")
             if deletions:
-                stats_parts.append(f"[red]-{deletions}[/red]")
+                stats_parts.append(f"[#f87171]-{deletions}[/#f87171]")
             yield Static(" ".join(stats_parts), classes="diff-stats")

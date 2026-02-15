@@ -11,7 +11,15 @@ import dotenv
 from rich.console import Console
 
 from deepagents_cli._version import __version__
+from deepagents_cli.auth_store import AuthError, AuthStore
+from deepagents_cli.model_registry import ModelCatalog, load_model_catalog, resolve_model_query
+from deepagents_cli.model_types import ModelEntry, ProviderConfig
+from deepagents_cli.provider_adapters import ProviderError, create_chat_model
+from deepagents_cli.settings_store import SettingsStore
 
+_deepagents_env = Path.home() / ".deepagents" / ".env"
+if _deepagents_env.exists():
+    dotenv.load_dotenv(dotenv_path=_deepagents_env, override=False)
 dotenv.load_dotenv()
 
 # CRITICAL: Override LANGSMITH_PROJECT to route agent traces to separate project
@@ -39,15 +47,16 @@ COLORS = {
 # ASCII art banner
 
 DEEP_AGENTS_ASCII = f"""
-  ___                   _                _      
- |   \\ ___ ___ _ __    /_\\  __ _ ___ _ _| |_ ___
- | |) / -_) -_) '_ \\  / _ \\/ _` / -_) ' \\  _(_-<
- |___/\\___\\___| .__/ /_/ \\_\\__, \\___|_||_\\__/__/
-              |_|          |___/                v{__version__}
+ _| _ _ _  _  _  _ _ |_ _ 
+(_|(-(-|_)(_|(_)(-| )|__) 
+       |     _/            v{__version__}
 """
 
 # Interactive commands
 COMMANDS = {
+    "assemble": "Assemble Linear issue workflow",
+    "model": "Select or switch the active model",
+    "models": "List or search models",
     "clear": "Clear screen and reset conversation",
     "help": "Show help information",
     "remember": "Review conversation and update memory/skills",
@@ -389,6 +398,17 @@ def get_default_coding_instructions() -> str:
     Long-term memory (AGENTS.md) is handled separately by the middleware.
     """
     default_prompt_path = Path(__file__).parent / "default_agent_prompt.md"
+
+    project_root = settings.project_root
+    if project_root:
+        override_candidates = [
+            project_root / ".deepagents" / "system.md",
+            project_root / ".deepagents" / "SYSTEM.md",
+        ]
+        for override_path in override_candidates:
+            if override_path.exists():
+                return override_path.read_text()
+
     return default_prompt_path.read_text()
 
 
@@ -414,24 +434,162 @@ def _detect_provider(model_name: str) -> str | None:
 REASONING_EFFORT_ALLOWED = {"none", "low", "medium", "high", "xhigh"}
 
 
-def _resolve_reasoning_effort(value: str | None) -> str:
+class NoModelSelectedError(RuntimeError):
+    pass
+
+
+class ModelConfigurationError(RuntimeError):
+    pass
+
+
+def _resolve_reasoning_effort(value: str | None, default: str | None) -> str:
     """Normalize reasoning effort and validate allowed values."""
-    effort = (value or os.environ.get("DEEPAGENTS_REASONING_EFFORT") or "high").strip().lower()
+    effort = (value or default or os.environ.get("DEEPAGENTS_REASONING_EFFORT") or "high").strip().lower()
     if effort not in REASONING_EFFORT_ALLOWED:
-        console.print(
-            f"[bold red]Error:[/bold red] Invalid reasoning effort: {effort}"
-        )
+        console.print(f"[bold red]Error:[/bold red] Invalid reasoning effort: {effort}")
         console.print("Allowed values: none, low, medium, high, xhigh")
         sys.exit(1)
     return effort
 
 
-def _resolve_service_tier(value: str | None) -> str:
+def _resolve_service_tier(value: str | None, default: str | None) -> str:
     """Resolve OpenAI service tier with priority default."""
-    tier = (value or os.environ.get("DEEPAGENTS_SERVICE_TIER") or "priority").strip()
+    tier = (value or default or os.environ.get("DEEPAGENTS_SERVICE_TIER") or "priority").strip()
     if tier == "prioty":
         tier = "priority"
     return tier
+
+
+def _builtin_provider(provider: str) -> ProviderConfig | None:
+    name = provider.lower()
+    if name == "openai":
+        return ProviderConfig(name="openai", api="openai-responses", base_url=None)
+    if name == "anthropic":
+        return ProviderConfig(name="anthropic", api="anthropic-messages", base_url=None)
+    if name == "google":
+        return ProviderConfig(name="google", api="google-generative-ai", base_url=None)
+    return None
+
+
+def _entry_from_active(active: dict[str, Any], provider: ProviderConfig) -> ModelEntry:
+    model_id = str(active.get("id") or "").strip()
+    if not model_id:
+        raise ModelConfigurationError("Active model config missing id")
+    name = str(active.get("name") or model_id).strip()
+    alias = str(active.get("alias") or active.get("name") or model_id).strip()
+    api = str(active.get("api") or provider.api).strip()
+    base_url = active.get("base_url") or active.get("baseUrl") or provider.base_url
+    if isinstance(base_url, str):
+        base_url = base_url.strip() or None
+    else:
+        base_url = None
+    reasoning = active.get("reasoning") or active.get("reasoning_effort")
+    reasoning_effort = None
+    reasoning_enabled = None
+    if isinstance(reasoning, bool):
+        reasoning_enabled = reasoning
+    elif isinstance(reasoning, str):
+        val = reasoning.strip().lower()
+        if val in {"false", "off", "none", "no"}:
+            reasoning_enabled = False
+        else:
+            reasoning_enabled = True
+            reasoning_effort = val
+    service_tier = active.get("service_tier") or active.get("serviceTier")
+    if isinstance(service_tier, str):
+        service_tier = service_tier.strip() or None
+    else:
+        service_tier = None
+    inputs = active.get("input") or active.get("inputs")
+    if isinstance(inputs, list):
+        inputs = [str(item) for item in inputs if str(item).strip()]
+    else:
+        inputs = None
+    max_tokens = active.get("max_tokens") or active.get("maxTokens")
+    if isinstance(max_tokens, str) and max_tokens.isdigit():
+        max_tokens = int(max_tokens)
+    if not isinstance(max_tokens, int):
+        max_tokens = None
+    context_window = active.get("context_window") or active.get("contextWindow")
+    if isinstance(context_window, str) and context_window.isdigit():
+        context_window = int(context_window)
+    if not isinstance(context_window, int):
+        context_window = None
+    compat = active.get("compat")
+    if not isinstance(compat, dict):
+        compat = {}
+    return ModelEntry(
+        id=model_id,
+        name=name,
+        alias=alias or model_id,
+        provider=provider.name,
+        api=api,
+        base_url=base_url,
+        reasoning_effort=reasoning_effort,
+        reasoning_enabled=reasoning_enabled,
+        service_tier=service_tier,
+        inputs=inputs,
+        max_tokens=max_tokens,
+        context_window=context_window,
+        compat=compat,
+        source=Path("settings"),
+    )
+
+
+def _resolve_model_selection(
+    model_name_override: str | None,
+    catalog: ModelCatalog,
+    settings_store: SettingsStore,
+) -> ModelEntry | None:
+    if model_name_override:
+        exact = resolve_model_query(model_name_override, catalog.models)
+        if exact:
+            return exact
+        if ":" in model_name_override:
+            provider_name, model_id = model_name_override.split(":", 1)
+            provider_name = provider_name.strip()
+            model_id = model_id.strip()
+            provider = catalog.providers.get(provider_name) or _builtin_provider(provider_name)
+            if not provider:
+                raise ModelConfigurationError(f"Provider '{provider_name}' is not configured")
+            return _entry_from_active({"id": model_id}, provider)
+        detected = _detect_provider(model_name_override)
+        if detected:
+            provider = catalog.providers.get(detected) or _builtin_provider(detected)
+            if provider:
+                return _entry_from_active({"id": model_name_override}, provider)
+        raise ModelConfigurationError(
+            f"Model '{model_name_override}' not found. Add it to ~/.deepagents/models.json or settings.json."
+        )
+
+    active = settings_store.get_active_model()
+    if isinstance(active, dict):
+        provider_name = str(active.get("provider") or "").strip()
+        if not provider_name:
+            raise ModelConfigurationError("Active model config missing provider")
+        provider = catalog.providers.get(provider_name) or _builtin_provider(provider_name)
+        if not provider:
+            raise ModelConfigurationError(f"Provider '{provider_name}' is not configured")
+        return _entry_from_active(active, provider)
+    if isinstance(active, str) and active.strip():
+        exact = resolve_model_query(active, catalog.models)
+        if exact:
+            return exact
+        if ":" in active:
+            provider_name, model_id = active.split(":", 1)
+            provider_name = provider_name.strip()
+            model_id = model_id.strip()
+            provider = catalog.providers.get(provider_name) or _builtin_provider(provider_name)
+            if not provider:
+                raise ModelConfigurationError(f"Provider '{provider_name}' is not configured")
+            return _entry_from_active({"id": model_id}, provider)
+        detected = _detect_provider(active)
+        if detected:
+            provider = catalog.providers.get(detected) or _builtin_provider(detected)
+            if provider:
+                return _entry_from_active({"id": active}, provider)
+        return None
+    return None
 
 
 def create_model(
@@ -440,98 +598,56 @@ def create_model(
     reasoning_effort: str | None = None,
     service_tier: str | None = None,
 ) -> BaseChatModel:
-    """Create the appropriate model based on available API keys.
-
-    Uses the global settings instance to determine which model to create.
-
-    Args:
-        model_name_override: Optional model name to use instead of environment variable
-
-    Returns:
-        ChatModel instance (OpenAI, Anthropic, or Google)
-
-    Raises:
-        SystemExit if no API key is configured or model provider can't be determined
-    """
-    # Determine provider and model
-    if model_name_override:
-        # Use provided model, auto-detect provider
-        provider = _detect_provider(model_name_override)
-        if not provider:
-            console.print(
-                f"[bold red]Error:[/bold red] Could not detect provider from model name: {model_name_override}"
-            )
-            console.print("\nSupported model name patterns:")
-            console.print("  - OpenAI: gpt-*, o1-*, o3-*")
-            console.print("  - Anthropic: claude-*")
-            console.print("  - Google: gemini-*")
-            sys.exit(1)
-
-        # Check if API key for detected provider is available
-        if provider == "openai" and not settings.has_openai:
-            console.print(
-                f"[bold red]Error:[/bold red] Model '{model_name_override}' requires OPENAI_API_KEY"
-            )
-            sys.exit(1)
-        elif provider == "anthropic" and not settings.has_anthropic:
-            console.print(
-                f"[bold red]Error:[/bold red] Model '{model_name_override}' requires ANTHROPIC_API_KEY"
-            )
-            sys.exit(1)
-        elif provider == "google" and not settings.has_google:
-            console.print(
-                f"[bold red]Error:[/bold red] Model '{model_name_override}' requires GOOGLE_API_KEY"
-            )
-            sys.exit(1)
-
-        model_name = model_name_override
-    # Use environment variable defaults, detect provider by API key priority
-    elif settings.has_openai:
-        provider = "openai"
-        model_name = os.environ.get("OPENAI_MODEL", "gpt-5.2-codex")
-    elif settings.has_anthropic:
-        provider = "anthropic"
-        model_name = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-    elif settings.has_google:
-        provider = "google"
-        model_name = os.environ.get("GOOGLE_MODEL", "gemini-3-pro-preview")
-    else:
-        console.print("[bold red]Error:[/bold red] No API key configured.")
-        console.print("\nPlease set one of the following environment variables:")
-        console.print("  - OPENAI_API_KEY     (for OpenAI models like gpt-5-mini)")
-        console.print("  - ANTHROPIC_API_KEY  (for Claude models)")
-        console.print("  - GOOGLE_API_KEY     (for Google Gemini models)")
-        console.print("\nExample:")
-        console.print("  export OPENAI_API_KEY=your_api_key_here")
-        console.print("\nOr add it to your .env file.")
-        sys.exit(1)
-
-    # Store model info in settings for display
-    settings.model_name = model_name
-    settings.model_provider = provider
-
-    # Create and return the model
-    if provider == "openai":
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            model=model_name,
-            use_responses_api=True,
-            service_tier=_resolve_service_tier(service_tier),
-            reasoning_effort=_resolve_reasoning_effort(reasoning_effort),
+    """Create the configured model from catalogs and settings."""
+    settings_store = SettingsStore(settings.project_root)
+    catalog = load_model_catalog(project_root=settings.project_root)
+    entry = _resolve_model_selection(model_name_override, catalog, settings_store)
+    if entry is None:
+        raise NoModelSelectedError(
+            "No active model selected. Use /model to choose one or set model.active in settings.json."
         )
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
+    provider = catalog.providers.get(entry.provider) or _builtin_provider(entry.provider)
+    if not provider:
+        raise ModelConfigurationError(f"Provider '{entry.provider}' is not configured")
 
-        return ChatAnthropic(
-            model_name=model_name,
-            max_tokens=20_000,  # type: ignore[arg-type]
+    auth_store = AuthStore()
+    try:
+        auth = auth_store.resolve(provider.name, provider.auth)
+    except AuthError as exc:
+        raise ModelConfigurationError(str(exc)) from exc
+    if auth is None:
+        raise ModelConfigurationError(
+            f"No credentials configured for provider '{provider.name}'. Add to ~/.deepagents/auth.json or settings."
         )
-    if provider == "google":
-        from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
-            model=model_name,
-            temperature=0,
-            max_tokens=None,
+    default_reasoning = settings_store.get_default_reasoning()
+    default_service_tier = settings_store.get_default_service_tier()
+
+    effective_reasoning: str | None = None
+    effective_service_tier: str | None = None
+
+    if entry.api == "openai-responses":
+        if entry.reasoning_enabled is False:
+            effective_reasoning = "none"
+        else:
+            effective_reasoning = _resolve_reasoning_effort(
+                reasoning_effort or entry.reasoning_effort, default_reasoning
+            )
+        effective_service_tier = _resolve_service_tier(
+            service_tier or entry.service_tier, default_service_tier
         )
+
+    try:
+        model = create_chat_model(
+            entry,
+            provider,
+            auth,
+            reasoning_effort=effective_reasoning,
+            service_tier=effective_service_tier,
+        )
+    except ProviderError as exc:
+        raise ModelConfigurationError(str(exc)) from exc
+
+    settings.model_name = entry.id
+    settings.model_provider = entry.provider
+    return model

@@ -23,13 +23,14 @@ class StatusBar(Horizontal):
     StatusBar {
         height: 1;
         dock: bottom;
-        background: $surface;
+        background: #111111;
         padding: 0 1;
     }
 
     StatusBar .status-mode {
         width: auto;
         padding: 0 1;
+        color: #3f3f46;
     }
 
     StatusBar .status-mode.normal {
@@ -37,57 +38,44 @@ class StatusBar(Horizontal):
     }
 
     StatusBar .status-mode.bash {
-        background: #ff1493;
-        color: white;
-        text-style: bold;
+        color: #3f3f46;
     }
 
     StatusBar .status-mode.command {
-        background: #8b5cf6;
-        color: white;
+        color: #3f3f46;
+    }
+
+    StatusBar .status-separator {
+        width: auto;
+        color: #3f3f46;
     }
 
     StatusBar .status-auto-approve {
         width: auto;
         padding: 0 1;
-    }
-
-    StatusBar .status-auto-approve.on {
-        background: #00AEEF;
-        color: black;
-    }
-
-    StatusBar .status-auto-approve.off {
-        background: #f59e0b;
-        color: black;
+        color: #3f3f46;
     }
 
     StatusBar .status-message {
         width: 1fr;
         padding: 0 1;
-        color: $text-muted;
+        color: #3f3f46;
     }
 
     StatusBar .status-message.thinking {
-        color: $warning;
-    }
-
-    StatusBar .status-cwd {
-        width: 1fr;
-        text-align: right;
-        color: $text-muted;
+        color: #71717a;
     }
 
     StatusBar .status-tokens {
         width: auto;
         padding: 0 1;
-        color: $text-muted;
+        color: #3f3f46;
     }
 
     StatusBar .status-model {
         width: auto;
         padding: 0 1;
-        color: $text-muted;
+        color: #71717a;
     }
     """
 
@@ -111,13 +99,16 @@ class StatusBar(Horizontal):
     def compose(self) -> ComposeResult:
         """Compose the status bar layout."""
         yield Static("", classes="status-mode normal", id="mode-indicator")
+        yield Static(" · ", classes="status-separator")
         yield Static(
-            "manual | shift+tab to cycle",
-            classes="status-auto-approve off",
+            "manual",
+            classes="status-auto-approve",
             id="auto-approve-indicator",
         )
+        yield Static(" · ", classes="status-separator")
         yield Static("", classes="status-message", id="status-message")
         yield Static("", classes="status-tokens", id="tokens-display")
+        yield Static(" · ", classes="status-separator")
         yield Static(settings.model_name or "", classes="status-model", id="model-display")
 
     def on_mount(self) -> None:
@@ -133,10 +124,10 @@ class StatusBar(Horizontal):
         indicator.remove_class("normal", "bash", "command")
 
         if mode == "bash":
-            indicator.update("BASH")
+            indicator.update("bash")
             indicator.add_class("bash")
         elif mode == "command":
-            indicator.update("CMD")
+            indicator.update("cmd")
             indicator.add_class("command")
         else:
             indicator.update("")
@@ -148,14 +139,10 @@ class StatusBar(Horizontal):
             indicator = self.query_one("#auto-approve-indicator", Static)
         except NoMatches:
             return
-        indicator.remove_class("on", "off")
-
         if new_value:
-            indicator.update("auto | shift+tab to cycle")
-            indicator.add_class("on")
+            indicator.update("auto")
         else:
-            indicator.update("manual | shift+tab to cycle")
-            indicator.add_class("off")
+            indicator.update("manual")
 
     def watch_cwd(self, new_value: str) -> None:
         """Update cwd display when it changes."""
@@ -239,6 +226,14 @@ class StatusBar(Horizontal):
             count: Current context token count
         """
         self.tokens = count
+
+    def set_model(self, model_name: str) -> None:
+        """Update the displayed model name."""
+        try:
+            display = self.query_one("#model-display", Static)
+        except NoMatches:
+            return
+        display.update(model_name)
 
     def hide_tokens(self) -> None:
         """Hide the token display (e.g., during streaming)."""

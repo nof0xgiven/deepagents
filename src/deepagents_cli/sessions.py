@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 import aiosqlite
+from langgraph.store.base import BaseStore
+from langgraph.store.sqlite.aio import AsyncSqliteStore
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from rich.table import Table
 
@@ -39,6 +41,13 @@ def get_db_path() -> Path:
     db_dir = Path.home() / ".deepagents"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "sessions.db"
+
+
+def get_store_path() -> Path:
+    """Get path to the persistent store database."""
+    db_dir = Path.home() / ".deepagents"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "store.db"
 
 
 def generate_thread_id() -> str:
@@ -168,6 +177,13 @@ async def get_checkpointer() -> AsyncIterator[AsyncSqliteSaver]:
     """Get AsyncSqliteSaver for the global database."""
     async with AsyncSqliteSaver.from_conn_string(str(get_db_path())) as checkpointer:
         yield checkpointer
+
+
+@asynccontextmanager
+async def get_store() -> AsyncIterator[BaseStore]:
+    """Get AsyncSqliteStore for persistent cross-thread storage."""
+    async with AsyncSqliteStore.from_conn_string(str(get_store_path())) as store:
+        yield store
 
 
 async def list_threads_command(

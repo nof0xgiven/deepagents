@@ -182,13 +182,16 @@ def show_help() -> None:
     console.print("[bold]Options:[/bold]", style=COLORS["primary"])
     console.print("  --agent NAME                  Agent identifier (default: agent)")
     console.print(
-        "  --model MODEL                 Model to use (e.g., claude-sonnet-4-5-20250929, gpt-4o)"
+        "  --model MODEL                 Model alias or provider:model-id"
     )
     console.print("  --auto-approve                Auto-approve tool usage without prompting")
     console.print(
         "  --sandbox TYPE                Remote sandbox for execution (modal, runloop, daytona)"
     )
     console.print("  --sandbox-id ID               Reuse existing sandbox (skips creation/cleanup)")
+    console.print("  --extensions ENTRY            Load extension by path or module:func (repeatable)")
+    console.print("  --extensions-only             Only load explicitly listed extensions")
+    console.print("  --no-extensions               Disable all extensions")
     console.print(
         "  -r, --resume [ID]             Resume thread: -r for most recent, -r <ID> for specific"
     )
@@ -203,7 +206,7 @@ def show_help() -> None:
         style=COLORS["dim"],
     )
     console.print(
-        "  deepagents --model gpt-4o               # Use specific model (auto-detects provider)",
+        "  deepagents --model provider:model-id    # Use specific model (explicit provider)",
         style=COLORS["dim"],
     )
     console.print(
@@ -238,6 +241,9 @@ def show_help() -> None:
     console.print("  Ctrl+J          Insert newline", style=COLORS["dim"])
     console.print("  Shift+Tab       Toggle auto-approve mode", style=COLORS["dim"])
     console.print("  @filename       Auto-complete files and inject content", style=COLORS["dim"])
-    console.print("  /command        Slash commands (/help, /clear, /quit)", style=COLORS["dim"])
+    console.print(
+        "  /command        Slash commands (/assemble, /model, /help, /clear, /quit)",
+        style=COLORS["dim"],
+    )
     console.print("  !command        Run bash commands directly", style=COLORS["dim"])
     console.print()

@@ -3,12 +3,16 @@
 import os
 import shutil
 import tempfile
+import textwrap
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.sandbox import SandboxBackendProtocol
+from deepagents.backends.store import StoreBackend
 from deepagents.middleware import MemoryMiddleware, SkillsMiddleware
 from langchain.agents.middleware import (
     InterruptOnConfig,
@@ -21,11 +25,443 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
+import yaml
 
 from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings
+from deepagents_cli.extensions import load_extensions
 from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
 from deepagents_cli.local_context import LocalContextMiddleware
 from deepagents_cli.shell import ShellMiddleware
+
+
+@dataclass(frozen=True)
+class _StoreRuntime:
+    store: BaseStore
+    config: dict[str, Any]
+    state: None = None
+
+
+def _build_store_backend(*, store: BaseStore, assistant_id: str) -> StoreBackend:
+    runtime = _StoreRuntime(
+        store=store,
+        config={"metadata": {"assistant_id": assistant_id}},
+    )
+    return StoreBackend(
+        runtime,
+        namespace=lambda _ctx: (assistant_id, "memories"),
+    )
+
+
+def _parse_frontmatter(content: str) -> dict[str, Any] | None:
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    end_idx = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx is None:
+        return None
+    raw = "\n".join(lines[1:end_idx])
+    try:
+        data = yaml.safe_load(raw) or {}
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _split_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None, content
+    end_idx = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end_idx = i
+            break
+    if end_idx is None:
+        return None, content
+    raw = "\n".join(lines[1:end_idx])
+    try:
+        data = yaml.safe_load(raw) or {}
+    except Exception:
+        data = None
+    body = "\n".join(lines[end_idx + 1 :])
+    return (data if isinstance(data, dict) else None), body
+
+
+def _normalize_skill_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",")]
+        return [item for item in items if item]
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value]
+        return [item for item in items if item]
+    return []
+
+
+_ASSEMBLE_SUBAGENT_DEFAULTS: dict[str, dict[str, str]] = {
+    "scout": {
+        "description": "Fast codebase recon that returns compressed context for handoff.",
+        "prompt": textwrap.dedent(
+            """
+            You are a scout. Quickly investigate a codebase and return structured findings that another agent can use without re-reading everything.
+
+            Your output will be passed to an agent who has NOT seen the files you explored.
+
+            Thoroughness (infer from task, default medium):
+            - Quick: Targeted lookups, key files only
+            - Medium: Follow imports, read critical sections
+            - Thorough: Trace all dependencies, check tests/types
+
+            Strategy:
+            1. Use code search to locate relevant files
+            2. Read key sections (not entire files)
+            3. Identify types, interfaces, key functions
+            4. Note dependencies between files
+
+            Output format:
+
+            ## Files Retrieved
+            List with exact line ranges:
+            1. `path/to/file.ts` (lines 10-50) - Description of what's here
+            2. `path/to/other.ts` (lines 100-150) - Description
+            3. ...
+
+            ## Key Code
+            Critical types, interfaces, or functions:
+
+            ```typescript
+            interface Example {
+              // actual code from the files
+            }
+            ```
+
+            ```typescript
+            function keyFunction() {
+              // actual implementation
+            }
+            ```
+
+            ## Architecture
+            Brief explanation of how the pieces connect.
+
+            ## Start Here
+            Which file to look at first and why.
+            """
+        ).strip(),
+    },
+    "planner": {
+        "description": "Creates implementation plans from context and requirements.",
+        "prompt": textwrap.dedent(
+            """
+            You are a planning specialist. You receive context (from a scout) and requirements, then produce a clear implementation plan.
+
+            You must NOT make any changes. Only read, analyze, and plan.
+
+            Input format you'll receive:
+            - Context/findings from a scout agent
+            - Original query or requirements
+
+            Output format:
+
+            ## Goal
+            One sentence summary of what needs to be done.
+
+            ## Plan
+            Numbered steps, each small and actionable:
+            1. Step one - specific file/function to modify
+            2. Step two - what to add/change
+            3. ...
+
+            ## Files to Modify
+            - `path/to/file.ts` - what changes
+            - `path/to/other.ts` - what changes
+
+            ## New Files (if any)
+            - `path/to/new.ts` - purpose
+
+            ## Risks
+            Anything to watch out for.
+
+            Keep the plan concrete. The worker agent will execute it verbatim.
+            """
+        ).strip(),
+    },
+    "worker": {
+        "description": "General-purpose subagent with full capabilities, isolated context.",
+        "prompt": textwrap.dedent(
+            """
+            You are a worker agent with full capabilities. You operate in an isolated context window to handle delegated tasks without polluting the main conversation.
+
+            Work autonomously to complete the assigned task. Use all available tools as needed.
+
+            Output format when finished:
+
+            ## Completed
+            What was done.
+
+            ## Files Changed
+            - `path/to/file.ts` - what changed
+
+            ## Notes (if any)
+            Anything the main agent should know.
+
+            If handing off to another agent (e.g. reviewer), include:
+            - Exact file paths changed
+            - Key functions/types touched (short list)
+            """
+        ).strip(),
+    },
+    "reviewer": {
+        "description": "Code review specialist for quality and security analysis.",
+        "prompt": textwrap.dedent(
+            """
+            You are a senior code reviewer. Analyze code for quality, security, and maintainability.
+
+            Bash is for read-only commands only: `git diff`, `git log`, `git show`. Do NOT modify files or run builds.
+            Assume tool permissions are not perfectly enforceable; keep all bash usage strictly read-only.
+
+            Strategy:
+            1. Run `git diff` to see recent changes (if applicable)
+            2. Read the modified files
+            3. Check for bugs, security issues, code smells
+
+            Output format:
+
+            ## Files Reviewed
+            - `path/to/file.ts` (lines X-Y)
+
+            ## Critical (must fix)
+            - `file.ts:42` - Issue description
+
+            ## Warnings (should fix)
+            - `file.ts:100` - Issue description
+
+            ## Suggestions (consider)
+            - `file.ts:150` - Improvement idea
+
+            ## Summary
+            Overall assessment in 2-3 sentences.
+
+            Be specific with file paths and line numbers.
+            """
+        ).strip(),
+    },
+}
+
+
+def _candidate_subagent_prompt_paths(
+    *,
+    assistant_id: str,
+    subagent_name: str,
+) -> list[Path]:
+    paths: list[Path] = []
+    project_root = settings.project_root
+    if project_root:
+        base = project_root / ".deepagents" / "subagents"
+        paths.extend(
+            [
+                base / f"{subagent_name}.md",
+                base / subagent_name / "SYSTEM.md",
+                base / subagent_name / "system.md",
+            ]
+        )
+
+    user_base = settings.get_agent_dir(assistant_id) / "subagents"
+    paths.extend(
+        [
+            user_base / f"{subagent_name}.md",
+            user_base / subagent_name / "SYSTEM.md",
+            user_base / subagent_name / "system.md",
+        ]
+    )
+    return paths
+
+
+def _load_assemble_subagent_prompt(
+    *,
+    assistant_id: str,
+    subagent_name: str,
+) -> tuple[str, str]:
+    defaults = _ASSEMBLE_SUBAGENT_DEFAULTS[subagent_name]
+    default_prompt = defaults["prompt"]
+    default_description = defaults["description"]
+
+    for path in _candidate_subagent_prompt_paths(
+        assistant_id=assistant_id,
+        subagent_name=subagent_name,
+    ):
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text()
+        except Exception:
+            continue
+
+        frontmatter, body = _split_frontmatter(content)
+        prompt = body.strip() or content.strip()
+        if not prompt:
+            continue
+
+        description = default_description
+        if frontmatter:
+            desc = frontmatter.get("description")
+            if isinstance(desc, str) and desc.strip():
+                description = desc.strip()
+
+        return prompt, description
+
+    return default_prompt, default_description
+
+
+def _find_subagent_agents_md(assistant_id: str, subagent_name: str) -> Path | None:
+    project_root = settings.project_root
+    if project_root:
+        project_path = (
+            project_root / ".deepagents" / "subagents" / subagent_name / "AGENTS.md"
+        )
+        if project_path.exists():
+            return project_path
+
+    user_path = settings.get_agent_dir(assistant_id) / "subagents" / subagent_name / "AGENTS.md"
+    if user_path.exists():
+        return user_path
+
+    return None
+
+
+def _build_subagent_skills_cache(
+    *,
+    assistant_id: str,
+    subagent_name: str,
+    skills: list[str],
+) -> Path | None:
+    if not skills:
+        return None
+
+    cache_dir = (
+        settings.get_agent_dir(assistant_id)
+        / "subagents"
+        / subagent_name
+        / ".skills_cache"
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for child in cache_dir.iterdir():
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+
+    project_skills_dir = settings.get_project_skills_dir()
+    user_skills_dir = settings.get_user_skills_dir(assistant_id)
+
+    linked = 0
+    for skill_name in skills:
+        src = None
+        if project_skills_dir:
+            candidate = project_skills_dir / skill_name
+            if candidate.is_dir():
+                src = candidate
+        if src is None:
+            candidate = user_skills_dir / skill_name
+            if candidate.is_dir():
+                src = candidate
+
+        if src is None:
+            console.print(
+                f"[yellow]⚠️ Subagent '{subagent_name}' skill not found: {skill_name}[/yellow]"
+            )
+            continue
+
+        dest = cache_dir / skill_name
+        if dest.exists() or dest.is_symlink():
+            if dest.is_dir() and not dest.is_symlink():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+
+        try:
+            dest.symlink_to(src, target_is_directory=True)
+        except Exception:
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        linked += 1
+
+    return cache_dir if linked else None
+
+
+def _resolve_subagent_skills_sources(
+    *,
+    assistant_id: str,
+    subagent_name: str,
+) -> list[str] | None:
+    agents_md = _find_subagent_agents_md(assistant_id, subagent_name)
+    if not agents_md:
+        return None
+
+    frontmatter = _parse_frontmatter(agents_md.read_text())
+    if not frontmatter:
+        return None
+
+    skill_names = _normalize_skill_list(frontmatter.get("skills"))
+    if not skill_names:
+        return None
+
+    cache_dir = _build_subagent_skills_cache(
+        assistant_id=assistant_id,
+        subagent_name=subagent_name,
+        skills=skill_names,
+    )
+    if not cache_dir:
+        return None
+
+    return [cache_dir.as_posix()]
+
+
+def _apply_subagent_skills_from_agents_md(
+    *,
+    assistant_id: str,
+    subagent_spec: dict[str, Any],
+) -> dict[str, Any]:
+    name = subagent_spec.get("name")
+    if not name or subagent_spec.get("skills"):
+        return subagent_spec
+
+    resolved = _resolve_subagent_skills_sources(
+        assistant_id=assistant_id,
+        subagent_name=str(name),
+    )
+    if not resolved:
+        return subagent_spec
+
+    updated = dict(subagent_spec)
+    updated["skills"] = resolved
+    return updated
+
+
+def _build_assemble_subagents(*, assistant_id: str) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    for name in _ASSEMBLE_SUBAGENT_DEFAULTS:
+        prompt, description = _load_assemble_subagent_prompt(
+            assistant_id=assistant_id,
+            subagent_name=name,
+        )
+        spec = {
+            "name": name,
+            "description": description,
+            "system_prompt": prompt,
+        }
+        spec = _apply_subagent_skills_from_agents_md(
+            assistant_id=assistant_id,
+            subagent_spec=spec,
+        )
+        specs.append(spec)
+    return specs
 
 
 def list_agents() -> None:
@@ -138,8 +574,16 @@ The filesystem backend is currently operating in: `{cwd}`
 
 """
 
+    memory_store_section = """### Persistent Memory Store
+
+Use `/memories/` for long-term notes that should persist across threads and runs.
+Example: `/memories/project_notes.md`
+
+"""
+
     return (
         working_dir_section
+        + memory_store_section
         + f"""### Skills Directory
 
 Your skills are stored at: `{agent_dir_path}/skills/`
@@ -381,6 +825,10 @@ def create_cli_agent(
     enable_skills: bool = True,
     enable_shell: bool = True,
     checkpointer: BaseCheckpointSaver | None = None,
+    store: BaseStore | None = None,
+    extensions: list[str] | None = None,
+    extensions_only: bool = False,
+    extensions_disabled: bool = False,
 ) -> tuple[Pregel, CompositeBackend]:
     """Create a CLI-configured agent with flexible options.
 
@@ -388,7 +836,7 @@ def create_cli_agent(
     internally and from external code (e.g., benchmarking frameworks, Harbor).
 
     Args:
-        model: LLM model to use (e.g., "anthropic:claude-sonnet-4-5-20250929")
+        model: LLM model to use (e.g., "provider:model-id")
         assistant_id: Agent identifier for memory/state storage
         tools: Additional tools to provide to agent
         sandbox: Optional sandbox backend for remote execution (e.g., ModalBackend).
@@ -404,6 +852,9 @@ def create_cli_agent(
         enable_shell: Enable ShellMiddleware for local shell execution (only in local mode)
         checkpointer: Optional checkpointer for session persistence. If None, uses
                      InMemorySaver (no persistence across CLI invocations).
+        extensions: Explicit extensions to load (paths or module:func strings)
+        extensions_only: If True, skip auto-discovered extensions
+        extensions_disabled: If True, disable all extensions
 
     Returns:
         2-tuple of (agent_graph, backend)
@@ -411,7 +862,6 @@ def create_cli_agent(
         - composite_backend: CompositeBackend for file operations
     """
     tools = tools or []
-    tool_by_name = {getattr(tool, "__name__", None): tool for tool in tools}
 
     # Setup agent directory for persistent memory (if enabled)
     if enable_memory or enable_skills:
@@ -508,52 +958,145 @@ def create_cli_agent(
             root_dir=large_results_dir,
             virtual_mode=True,
         )
+        routes: dict[str, Any] = {
+            "/large_tool_results/": large_results_backend,
+        }
+        if store is not None:
+            routes["/memories/"] = _build_store_backend(
+                store=store,
+                assistant_id=assistant_id,
+            )
         composite_backend = CompositeBackend(
             default=backend,
-            routes={
-                "/large_tool_results/": large_results_backend,
-            },
+            routes=routes,
         )
     else:
         # Sandbox mode: No special routing needed
+        routes: dict[str, Any] = {}
+        if store is not None:
+            routes["/memories/"] = _build_store_backend(
+                store=store,
+                assistant_id=assistant_id,
+            )
         composite_backend = CompositeBackend(
             default=backend,
-            routes={},
+            routes=routes,
         )
+
+    # Load extensions once backend routing is configured
+    extension_manager = load_extensions(
+        assistant_id=assistant_id,
+        project_root=settings.project_root,
+        store=store,
+        backend=composite_backend,
+        explicit=extensions or [],
+        only_explicit=extensions_only,
+        disabled=extensions_disabled,
+    )
+
+    if extension_manager.prompt_additions:
+        prompt_additions = "\n\n".join(extension_manager.prompt_additions)
+        if system_prompt.endswith("\n"):
+            system_prompt = f"{system_prompt}\n{prompt_additions}"
+        else:
+            system_prompt = f"{system_prompt}\n\n{prompt_additions}"
+
+    if extension_manager.tools:
+        tools.extend(extension_manager.tools)
+
+    if extension_manager.middleware:
+        agent_middleware.extend(extension_manager.middleware)
+
+    if extension_manager.has_hooks():
+        agent_middleware.append(extension_manager.build_middleware())
+
+    available_tool_names: set[str] = set()
+    for tool in tools:
+        tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+        if isinstance(tool_name, str) and tool_name:
+            available_tool_names.add(tool_name)
+    setattr(composite_backend, "available_tool_names", available_tool_names)
 
     # Create the agent
     # Use provided checkpointer or fallback to InMemorySaver
     final_checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
 
+    tool_by_name = {
+        getattr(tool, "__name__", None): tool
+        for tool in tools
+        if getattr(tool, "__name__", None)
+    }
+
     # Optional specialized subagents (warp_grep / fast_apply)
-    subagents = []
+    subagents: list[dict[str, Any]] = []
     warp_grep_tool = tool_by_name.get("warp_grep")
     if warp_grep_tool is not None:
-        subagents.append(
-            {
-                "name": "code-search",
-                "description": "Deep codebase search using Morph WarpGrep.",
-                "system_prompt": (
-                    "You are a code-search specialist. Use the warp_grep tool to find relevant code. "
-                    "Return concise findings with file paths and line references."
-                ),
-                "tools": [warp_grep_tool],
-            }
+        subagent_spec = {
+            "name": "code-search",
+            "description": "Deep codebase search using Morph WarpGrep.",
+            "system_prompt": (
+                "You are a code-search specialist. Use the warp_grep tool to find relevant code. "
+                "Return concise findings with file paths and line references."
+            ),
+            "tools": [warp_grep_tool],
+        }
+        subagent_skills = _resolve_subagent_skills_sources(
+            assistant_id=assistant_id,
+            subagent_name="code-search",
         )
+        if subagent_skills:
+            subagent_spec["skills"] = subagent_skills
+        subagents.append(subagent_spec)
 
     fast_apply_tool = tool_by_name.get("fast_apply")
     if fast_apply_tool is not None:
-        subagents.append(
-            {
-                "name": "fast-apply",
-                "description": "Apply edits quickly using Morph Fast Apply.",
-                "system_prompt": (
-                    "You are an edit application specialist. Use fast_apply to merge code edits. "
-                    "Confirm file paths and summarize what changed."
-                ),
-                "tools": [fast_apply_tool],
-            }
+        subagent_spec = {
+            "name": "fast-apply",
+            "description": "Apply edits quickly using Morph Fast Apply.",
+            "system_prompt": (
+                "You are an edit application specialist. Use fast_apply to merge code edits. "
+                "Confirm file paths and summarize what changed."
+            ),
+            "tools": [fast_apply_tool],
+        }
+        subagent_skills = _resolve_subagent_skills_sources(
+            assistant_id=assistant_id,
+            subagent_name="fast-apply",
         )
+        if subagent_skills:
+            subagent_spec["skills"] = subagent_skills
+        subagents.append(subagent_spec)
+
+    assemble_subagents = _build_assemble_subagents(assistant_id=assistant_id)
+    if assemble_subagents:
+        existing = {
+            spec.get("name")
+            for spec in subagents
+            if isinstance(spec, dict) and spec.get("name")
+        }
+        for subagent_spec in assemble_subagents:
+            if subagent_spec.get("name") in existing:
+                continue
+            subagents.append(subagent_spec)
+
+    if extension_manager.subagents:
+        for subagent_spec in extension_manager.subagents:
+            if not isinstance(subagent_spec, dict):
+                console.print(
+                    "[yellow]⚠️ Extension subagent ignored (invalid spec type).[/yellow]"
+                )
+                continue
+            if not subagent_spec.get("name"):
+                console.print(
+                    "[yellow]⚠️ Extension subagent missing name; skipped.[/yellow]"
+                )
+                continue
+            subagents.append(
+                _apply_subagent_skills_from_agents_md(
+                    assistant_id=assistant_id,
+                    subagent_spec=subagent_spec,
+                )
+            )
 
     agent = create_deep_agent(
         model=model,
@@ -561,8 +1104,10 @@ def create_cli_agent(
         tools=tools,
         subagents=subagents if subagents else None,
         backend=composite_backend,
+        store=store,
         middleware=agent_middleware,
         interrupt_on=interrupt_on,
         checkpointer=final_checkpointer,
     ).with_config(config)
+    setattr(agent, "available_tool_names", available_tool_names)
     return agent, composite_backend

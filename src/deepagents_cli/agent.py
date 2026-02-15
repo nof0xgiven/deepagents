@@ -28,6 +28,11 @@ from langgraph.runtime import Runtime
 from langgraph.store.base import BaseStore
 import yaml
 
+from deepagents_cli.background_tasks import (
+    BACKGROUND_TASKS_PROMPT,
+    BackgroundTaskManager,
+    BackgroundTaskMiddleware,
+)
 from deepagents_cli.config import COLORS, config, console, get_default_coding_instructions, settings
 from deepagents_cli.extensions import load_extensions
 from deepagents_cli.integrations.sandbox_factory import get_default_working_dir
@@ -829,7 +834,7 @@ def create_cli_agent(
     extensions: list[str] | None = None,
     extensions_only: bool = False,
     extensions_disabled: bool = False,
-) -> tuple[Pregel, CompositeBackend]:
+) -> tuple[Pregel, CompositeBackend, BackgroundTaskManager]:
     """Create a CLI-configured agent with flexible options.
 
     This is the main entry point for creating a deepagents CLI agent, usable both
@@ -857,9 +862,10 @@ def create_cli_agent(
         extensions_disabled: If True, disable all extensions
 
     Returns:
-        2-tuple of (agent_graph, backend)
+        3-tuple of (agent_graph, backend, task_manager)
         - agent_graph: Configured LangGraph Pregel instance ready for execution
         - composite_backend: CompositeBackend for file operations
+        - task_manager: BackgroundTaskManager for tracking background sub-agent tasks
     """
     tools = tools or []
 
@@ -1098,6 +1104,15 @@ def create_cli_agent(
                 )
             )
 
+    # Background task middleware for non-blocking sub-agent execution
+    task_manager = BackgroundTaskManager()
+    bg_middleware = BackgroundTaskMiddleware(task_manager)
+    agent_middleware.append(bg_middleware)
+
+    # Inject background task instructions into system prompt
+    if system_prompt:
+        system_prompt += BACKGROUND_TASKS_PROMPT
+
     agent = create_deep_agent(
         model=model,
         system_prompt=system_prompt,
@@ -1110,4 +1125,4 @@ def create_cli_agent(
         checkpointer=final_checkpointer,
     ).with_config(config)
     setattr(agent, "available_tool_names", available_tool_names)
-    return agent, composite_backend
+    return agent, composite_backend, task_manager

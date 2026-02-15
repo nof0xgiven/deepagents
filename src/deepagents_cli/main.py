@@ -277,7 +277,7 @@ async def run_textual_cli_async(
         auto_approve_override: bool,
         reasoning_effort_override: str | None = None,
         service_tier_override: str | None = None,
-    ) -> tuple[Pregel, Any]:
+    ) -> tuple[Pregel, Any, Any]:
         model = create_model(
             model_name_override,
             reasoning_effort=reasoning_effort_override or reasoning_effort,
@@ -332,14 +332,16 @@ async def run_textual_cli_async(
                 try:
                     agent = None
                     composite_backend = None
+                    task_manager = None
                     try:
-                        agent, composite_backend = build_agent(
+                        agent, composite_backend, task_manager = build_agent(
                             model_name,
                             auto_approve_override=auto_approve,
                         )
                     except NoModelSelectedError:
                         agent = None
                         composite_backend = None
+                        task_manager = None
 
                     # Run Textual app
                     await run_textual_app(
@@ -351,6 +353,7 @@ async def run_textual_cli_async(
                         cwd=Path.cwd(),
                         thread_id=thread_id,
                         initial_prompt=initial_prompt,
+                        task_manager=task_manager,
                     )
                 except ModelConfigurationError as e:
                     error_text = Text("❌ Failed to configure model: ", style="red")

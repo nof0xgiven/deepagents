@@ -26,6 +26,7 @@ We (Claude decided it was a collaborative "we" 😁) built a full terminal inter
 | **Extensions** | Plugin system for custom tools, middleware, subagents, and hooks | deepagents is extendable but has no plugin architecture |
 | **MCP integration** | Chrome DevTools, external tool servers via Model Context Protocol | Not included in base deepagents |
 | **Command system** | `/model`, `/assemble`, `/clear`, `/remember`, `/tokens` and more | No CLI command framework in base library |
+| **Background subagents** | Non-blocking `task` execution (`check_task`, `wait_for_task`) with a live running-agent pill in the TUI | Base flow blocks on subagent completion and has no built-in activity badge |
 | **Linear integration** | `/assemble` pipeline: scout -> planner -> worker -> reviewer on Linear issues | Domain-specific workflow not in base library |
 | **Session management** | Thread persistence, checkpoint resumption, conversation history | deepagents provides checkpointing primitives but no session UX |
 
@@ -151,6 +152,7 @@ The model selector reads from `~/.deepagents/`:
 ```
 
 See `docs/models.md`, `docs/providers.md`, `docs/oauth.md`, `docs/settings.md`.
+Background subagent behavior is documented in `docs/background-tasks.md`.
 
 ## Architecture
 

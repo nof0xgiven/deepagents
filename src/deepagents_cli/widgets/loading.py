@@ -52,6 +52,7 @@ class LoadingWidget(Static):
     DEFAULT_CSS = """
     LoadingWidget {
         height: auto;
+        margin-top: 1;
         padding: 0 1;
     }
 

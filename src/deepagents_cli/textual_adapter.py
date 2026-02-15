@@ -65,6 +65,8 @@ class TextualUIAdapter:
         scroll_to_bottom: Callable[[], None] | None = None,
         show_thinking: Callable[[], None] | None = None,
         hide_thinking: Callable[[], None] | None = None,
+        on_subagent_start: Callable[[tuple], None] | None = None,
+        on_subagent_end: Callable[[tuple], None] | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -76,6 +78,8 @@ class TextualUIAdapter:
             scroll_to_bottom: Callback to scroll chat to bottom
             show_thinking: Callback to show/reposition thinking spinner
             hide_thinking: Callback to hide thinking spinner
+            on_subagent_start: Callback fired when a subagent stream namespace starts
+            on_subagent_end: Callback fired when a subagent stream namespace ends
         """
         self._mount_message = mount_message
         self._update_status = update_status
@@ -84,6 +88,8 @@ class TextualUIAdapter:
         self._scroll_to_bottom = scroll_to_bottom
         self._show_thinking = show_thinking
         self._hide_thinking = hide_thinking
+        self._on_subagent_start = on_subagent_start
+        self._on_subagent_end = on_subagent_end
 
         # State tracking
         self._current_assistant_message: AssistantMessage | None = None
@@ -226,6 +232,29 @@ async def execute_task_textual(
     # when multiple subagents stream in parallel
     pending_text_by_namespace: dict[tuple, str] = {}
     assistant_message_by_namespace: dict[tuple, Any] = {}
+    active_subagent_namespaces: set[tuple] = set()
+
+    async def _emit_subagent_start(ns_key: tuple) -> None:
+        if ns_key == () or ns_key in active_subagent_namespaces:
+            return
+        active_subagent_namespaces.add(ns_key)
+        callback = adapter._on_subagent_start
+        if callback is None:
+            return
+        result = callback(ns_key)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _emit_subagent_end(ns_key: tuple) -> None:
+        if ns_key == () or ns_key not in active_subagent_namespaces:
+            return
+        active_subagent_namespaces.discard(ns_key)
+        callback = adapter._on_subagent_end
+        if callback is None:
+            return
+        result = callback(ns_key)
+        if asyncio.iscoroutine(result):
+            await result
 
     # Clear images from tracker after creating the message
     if image_tracker:
@@ -254,6 +283,7 @@ async def execute_task_textual(
 
                 # Convert namespace to hashable tuple for dict keys
                 ns_key = tuple(namespace) if namespace else ()
+                await _emit_subagent_start(ns_key)
 
                 # Filter out subagent outputs - only show main agent (empty namespace)
                 # Subagents run via Task tool and should only report back to the main agent
@@ -287,6 +317,10 @@ async def execute_task_textual(
                 elif current_stream_mode == "messages":
                     # Skip subagent outputs - only render main agent content in chat
                     if not is_main_agent:
+                        if isinstance(data, tuple) and len(data) == 2:
+                            subagent_message, _ = data
+                            if getattr(subagent_message, "chunk_position", None) == "last":
+                                await _emit_subagent_end(ns_key)
                         continue
 
                     if not isinstance(data, tuple) or len(data) != 2:
@@ -626,6 +660,8 @@ async def execute_task_textual(
                 adapter._token_tracker.add(captured_input_tokens, captured_output_tokens)
             else:
                 adapter._token_tracker.show()  # Restore previous value
+        for ns_key in list(active_subagent_namespaces):
+            await _emit_subagent_end(ns_key)
         return
 
     except KeyboardInterrupt:
@@ -658,11 +694,16 @@ async def execute_task_textual(
                 adapter._token_tracker.add(captured_input_tokens, captured_output_tokens)
             else:
                 adapter._token_tracker.show()  # Restore previous value
+        for ns_key in list(active_subagent_namespaces):
+            await _emit_subagent_end(ns_key)
         return
 
     # Update token tracker
     if adapter._token_tracker and (captured_input_tokens or captured_output_tokens):
         adapter._token_tracker.add(captured_input_tokens, captured_output_tokens)
+
+    for ns_key in list(active_subagent_namespaces):
+        await _emit_subagent_end(ns_key)
 
 
 async def _flush_assistant_text_ns(

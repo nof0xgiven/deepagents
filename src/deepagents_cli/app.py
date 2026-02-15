@@ -35,6 +35,7 @@ from deepagents_cli.widgets.messages import (
     ToolCallMessage,
     UserMessage,
 )
+from deepagents_cli.widgets.agents_pill import AgentsPill
 from deepagents_cli.widgets.status import StatusBar
 from deepagents_cli.widgets.welcome import WelcomeBanner
 
@@ -147,6 +148,7 @@ class DeepAgentsApp(App):
         cwd: str | Path | None = None,
         thread_id: str | None = None,
         initial_prompt: str | None = None,
+        task_manager: Any = None,  # noqa: ANN401  # BackgroundTaskManager
         **kwargs: Any,
     ) -> None:
         """Initialize the DeepAgents application.
@@ -160,6 +162,7 @@ class DeepAgentsApp(App):
             cwd: Current working directory to display
             thread_id: Optional thread ID for session persistence
             initial_prompt: Optional prompt to auto-submit when session starts
+            task_manager: Optional BackgroundTaskManager for background sub-agent tasks
             **kwargs: Additional arguments passed to parent
         """
         super().__init__(**kwargs)
@@ -172,6 +175,7 @@ class DeepAgentsApp(App):
         # Avoid collision with App._thread_id
         self._lc_thread_id = thread_id
         self._initial_prompt = initial_prompt
+        self._task_manager = task_manager
         self._status_bar: StatusBar | None = None
         self._chat_input: ChatInput | None = None
         self._quit_pending = False
@@ -182,6 +186,9 @@ class DeepAgentsApp(App):
         self._agent_worker: Worker[None] | None = None
         self._agent_running = False
         self._loading_widget: LoadingWidget | None = None
+        self._agents_pill: AgentsPill | None = None
+        self._background_agent_tasks: set[str] = set()
+        self._stream_agent_namespaces: set[tuple] = set()
         self._token_tracker: TextualTokenTracker | None = None
         self._model_controller = ModelController(project_root=settings.project_root)
         self._command_registry = build_default_registry()
@@ -198,13 +205,16 @@ class DeepAgentsApp(App):
                 yield SlashCommandMenu(id="slash-command-menu")
                 yield ChatInput(cwd=self._cwd, id="input-area")
 
-        # Status bar at bottom
+        # Status bar at bottom (yielded first so it claims the bottom edge)
         yield StatusBar(cwd=self._cwd, id="status-bar")
+        # Running agents pill (hidden when no agents active, docks above status bar)
+        yield AgentsPill(id="agents-pill")
 
     async def on_mount(self) -> None:
         """Initialize components after mount."""
         self._status_bar = self.query_one("#status-bar", StatusBar)
         self._chat_input = self.query_one("#input-area", ChatInput)
+        self._agents_pill = self.query_one("#agents-pill", AgentsPill)
 
         # Set initial auto-approve state
         if self._auto_approve:
@@ -229,6 +239,8 @@ class DeepAgentsApp(App):
                 scroll_to_bottom=self._scroll_chat_to_bottom,
                 show_thinking=self._show_thinking,
                 hide_thinking=self._hide_thinking,
+                on_subagent_start=self._on_subagent_stream_start,
+                on_subagent_end=self._on_subagent_stream_end,
             )
             self._ui_adapter.set_token_tracker(self._token_tracker)
         else:
@@ -236,6 +248,11 @@ class DeepAgentsApp(App):
             if self._status_bar:
                 self._status_bar.set_model("no model")
             self.call_after_refresh(lambda: asyncio.create_task(self._open_model_selector()))
+
+        # Register background task launch/completion callbacks
+        if self._task_manager:
+            self._task_manager.on_launch(self._on_background_task_launch)
+            self._task_manager.on_complete(self._on_background_task_complete)
 
         # Focus the input (autocomplete is now built into ChatInput)
         self._chat_input.focus_input()
@@ -295,6 +312,70 @@ class DeepAgentsApp(App):
         if self._loading_widget:
             await self._loading_widget.remove()
             self._loading_widget = None
+
+    def _on_background_task_launch(self, task_id: str) -> None:
+        """Handle background task launch — update agents pill."""
+
+        def _do():
+            self._background_agent_tasks.add(task_id)
+            self._refresh_agents_pill()
+
+        self.call_later(_do)
+
+    def _on_background_task_complete(self, task_id: str, result: dict) -> None:
+        """Handle background task completion — show notification and update pill."""
+
+        def _do():
+            self._background_agent_tasks.discard(task_id)
+            self._refresh_agents_pill()
+
+            status = result.get("status", "unknown")
+            duration = result.get("duration", "?")
+            if status == "completed":
+                msg = f"Background task '{task_id}' completed ({duration}s)"
+            elif status == "failed":
+                error = result.get("error", "unknown error")
+                msg = f"Background task '{task_id}' failed: {error}"
+            else:
+                msg = f"Background task '{task_id}' finished ({status})"
+            self.notify(msg, timeout=5)
+
+        self.call_later(_do)
+
+    def _on_subagent_stream_start(self, namespace: tuple) -> None:
+        """Handle subagent stream start from adapter namespace events."""
+
+        def _do() -> None:
+            self._stream_agent_namespaces.add(namespace)
+            self._refresh_agents_pill()
+
+        self.call_later(_do)
+
+    def _on_subagent_stream_end(self, namespace: tuple) -> None:
+        """Handle subagent stream completion from adapter namespace events."""
+
+        def _do() -> None:
+            self._stream_agent_namespaces.discard(namespace)
+            self._refresh_agents_pill()
+
+        self.call_later(_do)
+
+    def _refresh_agents_pill(self) -> None:
+        """Recalculate running-agent count for the badge."""
+        if self._agents_pill:
+            # Background tasks and subagent stream namespaces can refer to the same
+            # running subagent. Use the larger of the two active counts to avoid
+            # double-counting overlap while still supporting stream-only signals.
+            total = max(len(self._background_agent_tasks), len(self._stream_agent_namespaces))
+            self._agents_pill.count = total
+
+    def _cleanup_background_tasks(self) -> None:
+        """Cancel all running background tasks."""
+        if self._task_manager:
+            self._task_manager.cleanup()
+        self._background_agent_tasks.clear()
+        self._stream_agent_namespaces.clear()
+        self._refresh_agents_pill()
 
     def _size_initial_spacer(self) -> None:
         """Size the spacer to fill remaining viewport below input."""
@@ -523,7 +604,7 @@ class DeepAgentsApp(App):
         service_tier_override = entry.service_tier if entry else None
 
         try:
-            agent, backend = self._agent_builder(
+            agent, backend, task_manager = self._agent_builder(
                 normalized,
                 auto_approve_override=auto_approve,
                 reasoning_effort_override=reasoning_override,
@@ -538,8 +619,18 @@ class DeepAgentsApp(App):
             await self._mount_message(ErrorMessage(f"Model switch failed: {exc}"))
             return
 
+        # Clean up old background tasks before switching
+        self._cleanup_background_tasks()
+
         self._agent = agent
         self._backend = backend
+        self._task_manager = task_manager
+        if self._task_manager:
+            self._task_manager.on_launch(self._on_background_task_launch)
+            self._task_manager.on_complete(self._on_background_task_complete)
+        self._background_agent_tasks.clear()
+        self._stream_agent_namespaces.clear()
+        self._refresh_agents_pill()
         if self._ui_adapter is None:
             self._ui_adapter = TextualUIAdapter(
                 mount_message=self._mount_message,
@@ -549,6 +640,8 @@ class DeepAgentsApp(App):
                 scroll_to_bottom=self._scroll_chat_to_bottom,
                 show_thinking=self._show_thinking,
                 hide_thinking=self._hide_thinking,
+                on_subagent_start=self._on_subagent_stream_start,
+                on_subagent_end=self._on_subagent_stream_end,
             )
             self._ui_adapter.set_token_tracker(self._token_tracker)
         if self._token_tracker:
@@ -823,7 +916,8 @@ class DeepAgentsApp(App):
         self.call_after_refresh(self._resize_spacer)
 
     async def _clear_messages(self) -> None:
-        """Clear the messages area."""
+        """Clear the messages area and cancel background tasks."""
+        self._cleanup_background_tasks()
         try:
             messages = self.query_one("#messages", Container)
             await messages.remove_children()
@@ -843,6 +937,7 @@ class DeepAgentsApp(App):
         # If agent is running, interrupt it
         if self._agent_running and self._agent_worker:
             self._agent_worker.cancel()
+            self._cleanup_background_tasks()
             self._quit_pending = False
             return
 
@@ -854,6 +949,7 @@ class DeepAgentsApp(App):
 
         # Double Ctrl+C to quit
         if self._quit_pending:
+            self._cleanup_background_tasks()
             self.exit()
         else:
             self._quit_pending = True
@@ -867,6 +963,7 @@ class DeepAgentsApp(App):
         # If agent is running, interrupt it
         if self._agent_running and self._agent_worker:
             self._agent_worker.cancel()
+            self._cleanup_background_tasks()
             return
 
         # If approval menu is active, reject it
@@ -881,6 +978,7 @@ class DeepAgentsApp(App):
 
     def action_quit_app(self) -> None:
         """Handle quit action (Ctrl+D)."""
+        self._cleanup_background_tasks()
         self.exit()
 
     def action_toggle_auto_approve(self) -> None:
@@ -892,15 +990,16 @@ class DeepAgentsApp(App):
             self._session_state.auto_approve = self._auto_approve
 
     def action_toggle_tool_output(self) -> None:
-        """Toggle expand/collapse of the most recent tool output."""
-        # Find all tool messages with output, get the most recent one
+        """Toggle expand/collapse of all tool outputs."""
         try:
             tool_messages = list(self.query(ToolCallMessage))
-            # Find ones with output, toggle the most recent
-            for tool_msg in reversed(tool_messages):
-                if tool_msg.has_output:
+            outputs = [m for m in tool_messages if m.has_output]
+            if not outputs:
+                return
+            target_state = not outputs[0]._expanded
+            for tool_msg in outputs:
+                if tool_msg._expanded != target_state:
                     tool_msg.toggle_output()
-                    return
         except Exception:
             pass
 
@@ -975,6 +1074,7 @@ async def run_textual_app(
     cwd: str | Path | None = None,
     thread_id: str | None = None,
     initial_prompt: str | None = None,
+    task_manager: Any = None,  # noqa: ANN401  # BackgroundTaskManager
 ) -> None:
     """Run the Textual application.
 
@@ -987,6 +1087,7 @@ async def run_textual_app(
         cwd: Current working directory to display
         thread_id: Optional thread ID for session persistence
         initial_prompt: Optional prompt to auto-submit when session starts
+        task_manager: Optional BackgroundTaskManager for background sub-agent tasks
     """
     app = DeepAgentsApp(
         agent=agent,
@@ -997,6 +1098,7 @@ async def run_textual_app(
         cwd=cwd,
         thread_id=thread_id,
         initial_prompt=initial_prompt,
+        task_manager=task_manager,
     )
     await app.run_async()
 

@@ -89,6 +89,28 @@ Screen {
     margin-bottom: 0;
 }
 
+/* Running agents pill */
+#agents-pill {
+    dock: bottom;
+    height: 1;
+    width: auto;
+    margin: 0 0 0 1;
+    padding: 0 1;
+    color: #a1a1aa;
+    background: #18181b;
+    text-style: dim;
+    display: none;
+}
+
+#agents-pill.active {
+    display: block;
+}
+
+#agents-pill.pulse-on {
+    color: #d4d4d8;
+    text-style: none;
+}
+
 /* Status bar */
 #status-bar {
     height: 1;
@@ -204,6 +226,37 @@ Screen {
     border: solid #27272a;
     padding: 1 2;
     layer: autocomplete;
+}
+
+/* Toast notifications - ghost glass */
+Toast {
+    background: #18181b;
+    color: #a1a1aa;
+    border-left: outer #3f3f46;
+}
+
+Toast.-information {
+    border-left: outer #00AEEF;
+}
+
+Toast.-information .toast--title {
+    color: #00AEEF;
+}
+
+Toast.-warning {
+    border-left: outer #fbbf24;
+}
+
+Toast.-warning .toast--title {
+    color: #fbbf24;
+}
+
+Toast.-error {
+    border-left: outer #ef4444;
+}
+
+Toast.-error .toast--title {
+    color: #ef4444;
 }
 
 /* Model selector modal - ghost glass */

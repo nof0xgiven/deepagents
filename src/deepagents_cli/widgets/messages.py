@@ -62,14 +62,14 @@ class AssistantMessage(Vertical):
     DEFAULT_CSS = """
     AssistantMessage {
         height: auto;
-        padding: 1 2 0 2;
+        padding: 1 2;
         margin: 1 0;
         background: #151515;
     }
 
     AssistantMessage Markdown {
         padding: 0;
-        margin: 0 0 -1 0;
+        margin: 0;
     }
     """
 
@@ -156,7 +156,7 @@ class ToolCallMessage(Vertical):
     DEFAULT_CSS = """
     ToolCallMessage {
         height: auto;
-        padding: 0 1;
+        padding: 1 1;
         margin: 0 0;
         background: #151515;
     }
@@ -255,7 +255,7 @@ class ToolCallMessage(Vertical):
         """Compose the tool call message layout."""
         tool_label = format_tool_display(self._tool_name, self._args)
         yield Static(
-            f"[#71717a]◆[/#71717a] {tool_label}",
+            f"{tool_label}",
             classes="tool-header",
         )
         args = self._filtered_args()
@@ -406,7 +406,7 @@ class ToolCallMessage(Vertical):
                 self._preview_widget.display = True
 
                 # Show expand hint
-                self._hint_widget.update("[dim]... (click to expand)[/dim]")
+                self._hint_widget.update("[dim]... (click or ctrl+o to expand)[/dim]")
                 self._hint_widget.display = True
             elif output_stripped:
                 # Output fits in preview, just show it

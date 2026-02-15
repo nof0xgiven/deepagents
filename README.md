@@ -1,100 +1,79 @@
-# DeepAgents CLI Harness
+# DeepAgents
 
-This repo packages a configured DeepAgents CLI so you can run `deepagents` in your terminal and start an interactive session.
+An AI coding agent that runs in your terminal. DeepAgents gives you a full TUI — autocomplete, model switching, tool approvals, persistent memory, skills, and multi-model support — built on LangChain and LangGraph. Think of it as a local-first, extensible alternative to cloud-hosted coding assistants, where you own the agent loop and can plug in any LLM provider.
+
+## What it does
+
+You type. The agent reads your codebase, writes code, runs commands, and manages files — all inside a Textual-powered terminal UI. It remembers context across sessions, delegates to subagents for parallel work, and integrates with external tools via MCP servers and extensions.
+
+It supports OpenAI, Anthropic, Google, and any OpenAI-compatible provider. You can switch models mid-conversation, configure reasoning effort, and bring your own API keys.
 
 ## Quickstart
 
 ```bash
-# Create venv
-python3 -m venv .venv
-source .venv/bin/activate
+# Install with uv (recommended)
+uv pip install -e .
 
-# Install
+# Or classic pip
 pip install -e .
 
-# Run (auto-approve on by default)
+# Run
 deepagents
 ```
 
-## Environment
+On first launch, the model selector opens automatically. Pick a model and start working.
 
-Recommended in `~/.deepagents/.env` (user-local) for simple environment-based auth:
+## Configuration
+
+Create `~/.deepagents/.env` for API keys:
 
 ```bash
-# API keys
 OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
 GOOGLE_API_KEY=...
-
-# Defaults
-DEEPAGENTS_REASONING_EFFORT=high
-DEEPAGENTS_SERVICE_TIER=priority
 ```
 
-For multi-provider setups or OAuth, use `~/.deepagents/auth.json`
-(see `docs/oauth.md`).
+Or use `~/.deepagents/auth.json` for multi-provider setups and OAuth (see `docs/oauth.md`).
 
-Required in repo `.env` (already present in this repo):
+### Environment variables
 
-- `OPENAI_API_KEY`
-- `LANGSMITH_API_KEY`
-- `MORPH_API_KEY`
-
-Optional overrides:
-
-- `OPENAI_MODEL`
-- `DEEPAGENTS_SERVICE_TIER` (default: `priority`)
-- `DEEPAGENTS_REASONING_EFFORT` (default: `high`; allowed: `none|low|medium|high|xhigh`)
-- `DEEPAGENTS_MCP` (default: `1`; set to `0` to disable all MCP tools)
-- `DEEPAGENTS_CHROME_MCP` (default: `1`; set to `0` to disable Chrome DevTools MCP)
-- `DEEPAGENTS_CHROME_BROWSER_URL` (connect to an existing Chrome with remote debugging)
-- `DEEPAGENTS_CHROME_WS_ENDPOINT` (connect to an existing Chrome via DevTools WS endpoint)
-- `DEEPAGENTS_CHROME_AUTOCONNECT` (default: `1`; auto-connect to a running Chrome)
-- `DEEPAGENTS_CHROME_CHANNEL` (optional channel for auto-connect, e.g. `beta`)
-- `DEEPAGENTS_CHROME_MCP_COMMAND` (default: `npx`)
-- `DEEPAGENTS_CHROME_MCP_PACKAGE` (default: `chrome-devtools-mcp@latest`)
-- `DEEPAGENTS_CHROME_MCP_ARGS` (extra args passed to the MCP server)
+| Variable | Default | Description |
+|---|---|---|
+| `DEEPAGENTS_REASONING_EFFORT` | `high` | `none\|low\|medium\|high\|xhigh` |
+| `DEEPAGENTS_SERVICE_TIER` | `priority` | OpenAI service tier |
+| `DEEPAGENTS_MCP` | `1` | Set `0` to disable MCP tools |
+| `DEEPAGENTS_CHROME_MCP` | `1` | Set `0` to disable Chrome DevTools |
 
 ## CLI
 
 ```bash
-# Start interactive TUI
-deepagents
-
-# Use a specific agent profile (separate memory/skills)
-deepagents --agent mybot
-
-# Override model (by alias or provider:model-id)
-deepagents --model provider:model-id
-
-# Override reasoning/service tier
-deepagents --reasoning medium --service-tier priority
-
-# Require approvals
-deepagents --no-auto-approve
+deepagents                              # Interactive TUI
+deepagents --agent mybot                # Named agent profile (separate memory/skills)
+deepagents --model openai:gpt-4o        # Override model
+deepagents --reasoning medium           # Override reasoning effort
+deepagents --no-auto-approve            # Require tool approvals
 ```
 
-### Model selection
+### In-session commands
 
-Use `/model` to open the selector and switch models inside the TUI. If no active
-model is configured, the selector opens automatically and the agent will block
-until you choose one.
+| Command | Description |
+|---|---|
+| `/model` | Open model selector |
+| `/model my-alias` | Switch to a model by alias |
+| `/debug model` | Inspect resolved model config |
+| `/assemble` | Run Linear issue pipeline (scout -> planner -> worker -> reviewer) |
+| `/clear` | Clear chat, start new session |
+| `/remember` | Persist learnings to memory and skills |
+| `/tokens` | Show token usage |
+| `/threads` | Show session info |
 
-```text
-/model
-/model
-/model my-alias
-```
+Type `@` to fuzzy-search project files. Type `/` to browse commands.
 
-Use `/debug model` to inspect the resolved model selection (settings, allow-list,
-and catalog resolution).
+## Model selection
 
-The selector reads `~/.deepagents/models.json` (providers + models), credentials
-from `~/.deepagents/auth.json`, and defaults from `~/.deepagents/settings.json`.
-Use `alias` to name entries and select them by alias.
+The model selector reads from three files in `~/.deepagents/`:
 
-Example `~/.deepagents/models.json`:
-
+**models.json** — provider catalog:
 ```json
 {
   "providers": {
@@ -102,146 +81,95 @@ Example `~/.deepagents/models.json`:
       "base_url": "https://api.openai.com/v1",
       "api": "openai-responses",
       "models": [
-        {
-          "id": "model-id",
-          "name": "Primary",
-          "alias": "primary",
-          "reasoning": "high",
-          "service_tier": "priority"
-        }
+        { "id": "gpt-4o", "alias": "primary", "reasoning": "high" }
       ]
     }
   }
 }
 ```
 
-Example `~/.deepagents/auth.json`:
-
+**auth.json** — credentials:
 ```json
 {
   "openai": { "type": "api_key", "key": "sk-..." }
 }
 ```
 
-Example `~/.deepagents/settings.json`:
-
+**settings.json** — defaults:
 ```json
 {
   "model": {
-    "active": { "provider": "openai", "id": "model-id" },
+    "active": { "provider": "openai", "id": "gpt-4o" },
     "reasoning": "high",
     "service_tier": "priority"
   }
 }
 ```
 
-Compatibility keys (optional):
-
-```json
-{
-  "defaultProvider": "provider-name",
-  "defaultModel": "model-id",
-  "defaultThinkingLevel": "high",
-  "enabledModels": ["provider/model-id"]
-}
-```
-
-Additional docs:
-- `docs/providers.md`
-- `docs/models.md`
-- `docs/oauth.md`
-- `docs/settings.md`
+See `docs/models.md`, `docs/providers.md`, `docs/settings.md` for full reference.
 
 ## Features
 
-- **DeepAgents CLI** with TUI, threads, skills, and persistent memory (AGENTS.md)
-- **OpenAI Responses API** when configured, with `service_tier` support
-- **Subagents** for parallel delegation
-- **Skills** via `~/.deepagents/<agent>/skills/` and `<project>/.deepagents/skills/`
-- **Morph tools**: `warp_grep`, `fast_apply`
-- **Extensions** loaded from `~/.deepagents/extensions/` and `<project>/.deepagents/extensions/`
-- **/assemble** Linear pipeline (scout -> planner -> worker -> reviewer) when the Linear extension is enabled
-- **Chrome DevTools MCP tools** (prefixed with `chrome_`)
+- **Terminal UI** built with Textual — keyboard-driven, dark theme, responsive layout
+- **Multi-provider** support: OpenAI, Anthropic, Google, and any OpenAI-compatible API
+- **Live model switching** via `/model` selector with alias support
+- **Tool approval flow** with auto-approve toggle (Shift+Tab)
+- **Persistent memory** across sessions via AGENTS.md
+- **Skills** — reusable prompt modules loaded from `~/.deepagents/<agent>/skills/`
+- **Subagents** for parallel task delegation
+- **Extensions** — pluggable Python modules for custom integrations
+- **Chrome DevTools MCP** — browse, click, and automate web pages from the agent
+- **File autocomplete** — fuzzy `@file` search across git-tracked files
+- **Slash commands** — `/assemble`, `/model`, `/clear`, `/remember`, and more
+- **Session threads** with checkpoint-based history resumption
 
 ## Extensions
 
-Detailed extension documentation lives at `docs/extensions.md`.
-
-### Getting started
-
-Create `~/.deepagents/settings.json` and list any explicit extensions:
+Extensions are Python modules that register tools, middleware, or commands. They load from `~/.deepagents/extensions/` and `<project>/.deepagents/extensions/`.
 
 ```json
 {
-  "extensions": [
-    "~/.deepagents/extensions/my_ext.py",
-    "/absolute/path/to/other_ext"
-  ],
+  "extensions": ["~/.deepagents/extensions/my_ext.py"],
   "extension_settings": {
-    "my_ext": {
-      "log_level": "debug"
-    }
+    "my_ext": { "log_level": "debug" }
   }
 }
 ```
 
-Run with explicit-only loading if you want to skip auto-discovery:
+Built-in: **Linear** (`deepagents_cli.ext.linear:register`) — powers the `/assemble` pipeline.
 
-```bash
-deepagents --extensions-only
-```
+See `docs/extensions.md` for the full extension API.
 
-Built-in extension modules:
-- Linear: `deepagents_cli.ext.linear:register`
-
-### /assemble prompts
-
-`/assemble` uses subagent prompts from `~/.deepagents/<agent>/subagents/` or
-`<project>/.deepagents/subagents/`.
-
-## Memory + Skills Layout
+## Memory and skills layout
 
 ```
 ~/.deepagents/<agent>/
-  ├── AGENTS.md
-  ├── subagents/
-  │   └── <name>.md or <name>/SYSTEM.md
-  └── skills/
-      └── <skill>/SKILL.md
+  AGENTS.md                     # Agent memory and context
+  subagents/<name>.md           # Subagent system prompts
+  skills/<skill>/SKILL.md       # Reusable skill definitions
 
 <project>/.deepagents/
-  ├── AGENTS.md
-  ├── subagents/
-  │   └── <name>.md or <name>/SYSTEM.md
-  └── skills/
-      └── <skill>/SKILL.md
+  AGENTS.md                     # Project-specific agent context
+  subagents/<name>.md
+  skills/<skill>/SKILL.md
 ```
 
-## Notes
+## Chrome DevTools
 
-- The CLI uses DeepAgents middleware for memory and skills.
-- Model selection is explicit; configure a model before running tasks.
-- Reasoning effort defaults to `high` but can be overridden per run.
+The agent can control Chrome for web automation. It starts `chrome-devtools-mcp` via npx by default.
 
-## Chrome DevTools MCP (Headless)
-
-The CLI will start `chrome-devtools-mcp` via `npx` by default and add its tools
-(prefixed with `chrome_`) to the agent. If you want to attach to an existing
-Chrome session so the agent can see your current tabs, launch Chrome with remote
-debugging and set `DEEPAGENTS_CHROME_BROWSER_URL`:
+To attach to your own browser session:
 
 ```bash
 DEEPAGENTS_CHROME_BROWSER_URL=http://127.0.0.1:9222 deepagents
 ```
 
-If you have Chrome configured for auto-connect, you can enable it with:
-
-```bash
-DEEPAGENTS_CHROME_AUTOCONNECT=1 DEEPAGENTS_CHROME_CHANNEL=beta deepagents
-```
-
-To disable Chrome DevTools MCP entirely:
+To disable entirely:
 
 ```bash
 DEEPAGENTS_CHROME_MCP=0 deepagents
 ```
+
+## License
+
+MIT

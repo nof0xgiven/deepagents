@@ -3,4 +3,7 @@
 .deepagents/
 __pycache__/
 *.pyc
+*.egg-info/
 .superset/
+AGENTS.md
+memory-bank/

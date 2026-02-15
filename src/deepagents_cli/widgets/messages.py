@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from time import time
 from typing import TYPE_CHECKING, Any
 
 from rich.text import Text
 from textual.containers import Vertical
+from textual.timer import Timer
 from textual.widgets import Markdown, Static
 from textual.widgets._markdown import MarkdownStream
 
 from deepagents_cli.ui import format_tool_display
 from deepagents_cli.widgets.diff import format_diff_textual
+from deepagents_cli.widgets.loading import BrailleSpinner
 
 if TYPE_CHECKING:
     from textual.app import ComposeResult
@@ -187,6 +190,10 @@ class ToolCallMessage(Vertical):
         color: #71717a;
     }
 
+    ToolCallMessage .tool-status.executing {
+        color: #71717a;
+    }
+
     ToolCallMessage .tool-output {
         margin-left: 2;
         margin-top: 1;
@@ -212,6 +219,9 @@ class ToolCallMessage(Vertical):
     _PREVIEW_LINES = 3
     _PREVIEW_CHARS = 200
 
+    # Tools that show an executing indicator (long-running)
+    _LONG_RUNNING_TOOLS = {"task"}
+
     def __init__(
         self,
         tool_name: str,
@@ -236,6 +246,10 @@ class ToolCallMessage(Vertical):
         self._preview_widget: Static | None = None
         self._hint_widget: Static | None = None
         self._full_widget: Static | None = None
+        # Executing state for long-running tools
+        self._executing_timer: Timer | None = None
+        self._executing_start_time: float = 0.0
+        self._spinner: BrailleSpinner | None = None
 
     def compose(self) -> ComposeResult:
         """Compose the tool call message layout."""
@@ -268,6 +282,34 @@ class ToolCallMessage(Vertical):
         self._preview_widget.display = False
         self._hint_widget.display = False
         self._full_widget.display = False
+        if self._tool_name in self._LONG_RUNNING_TOOLS:
+            self._start_executing()
+
+    def _start_executing(self) -> None:
+        """Start the executing indicator for long-running tools."""
+        self._executing_start_time = time()
+        self._spinner = BrailleSpinner()
+        if self._status_widget:
+            self._status_widget.update(f"{self._spinner.current_frame()} working... (0s)")
+            self._status_widget.add_class("executing")
+            self._status_widget.display = True
+        self._executing_timer = self.set_interval(0.1, self._update_executing)
+
+    def _update_executing(self) -> None:
+        """Update the executing spinner and elapsed time."""
+        if self._spinner and self._status_widget:
+            frame = self._spinner.next_frame()
+            elapsed = int(time() - self._executing_start_time)
+            self._status_widget.update(f"{frame} working... ({elapsed}s)")
+
+    def _stop_executing(self) -> None:
+        """Stop the executing indicator."""
+        if self._executing_timer is not None:
+            self._executing_timer.stop()
+            self._executing_timer = None
+        if self._status_widget:
+            self._status_widget.remove_class("executing")
+            self._status_widget.display = False
 
     def set_success(self, result: str = "") -> None:
         """Mark the tool call as successful.
@@ -275,6 +317,7 @@ class ToolCallMessage(Vertical):
         Args:
             result: Tool output/result to display
         """
+        self._stop_executing()
         self._status = "success"
         self._output = result
         # No status label for success - just show output
@@ -286,6 +329,7 @@ class ToolCallMessage(Vertical):
         Args:
             error: Error message
         """
+        self._stop_executing()
         self._status = "error"
         self._output = error
         if self._status_widget:
@@ -298,6 +342,7 @@ class ToolCallMessage(Vertical):
 
     def set_rejected(self) -> None:
         """Mark the tool call as rejected by user."""
+        self._stop_executing()
         self._status = "rejected"
         if self._status_widget:
             self._status_widget.add_class("rejected")
@@ -306,6 +351,7 @@ class ToolCallMessage(Vertical):
 
     def set_skipped(self) -> None:
         """Mark the tool call as skipped (due to another rejection)."""
+        self._stop_executing()
         self._status = "skipped"
         if self._status_widget:
             self._status_widget.add_class("rejected")  # Use same styling as rejected

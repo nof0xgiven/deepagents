@@ -56,9 +56,9 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
     # Add stats header
     stats_parts = []
     if additions:
-        stats_parts.append(f"[#4ade80]+{additions}[/#4ade80]")
+        stats_parts.append(f"[#72d69f]+{additions}[/#72d69f]")
     if deletions:
-        stats_parts.append(f"[#f87171]-{deletions}[/#f87171]")
+        stats_parts.append(f"[#ff7a7a]-{deletions}[/#ff7a7a]")
     if stats_parts:
         formatted.append(" ".join(stats_parts))
         formatted.append("")  # Blank line after stats
@@ -86,25 +86,25 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
 
         if line.startswith("-"):
             formatted.append(
-                f"[#3f3f46]{old_num:>{width}}[/#3f3f46] "
-                f"[#f87171]-{escaped_content}[/#f87171]"
+                f"[#94a5b6]{old_num:>{width}}[/#94a5b6] "
+                f"[#ff7a7a]-{escaped_content}[/#ff7a7a]"
             )
             old_num += 1
             line_count += 1
         elif line.startswith("+"):
             formatted.append(
-                f"[#3f3f46]{new_num:>{width}}[/#3f3f46] "
-                f"[#4ade80]+{escaped_content}[/#4ade80]"
+                f"[#94a5b6]{new_num:>{width}}[/#94a5b6] "
+                f"[#72d69f]+{escaped_content}[/#72d69f]"
             )
             new_num += 1
             line_count += 1
         elif line.startswith(" "):
-            formatted.append(f"[#3f3f46]{old_num:>{width}}[/#3f3f46]  {escaped_content}")
+            formatted.append(f"[#94a5b6]{old_num:>{width}}[/#94a5b6]  {escaped_content}")
             old_num += 1
             new_num += 1
             line_count += 1
         elif line.strip() == "...":
-            formatted.append("[#3f3f46]...[/#3f3f46]")
+            formatted.append("[#94a5b6]...[/#94a5b6]")
             line_count += 1
 
     return "\n".join(formatted)
@@ -117,11 +117,12 @@ class EnhancedDiff(Vertical):
     EnhancedDiff {
         height: auto;
         padding: 1;
-        background: #151515;
+        background: transparent;
+        border-left: solid #98a8b8 42%;
     }
 
     EnhancedDiff .diff-title {
-        color: #71717a;
+        color: #d0dbe7;
         margin-bottom: 1;
     }
 
@@ -130,7 +131,7 @@ class EnhancedDiff(Vertical):
     }
 
     EnhancedDiff .diff-stats {
-        color: #71717a;
+        color: #b8c6d4;
         margin-top: 1;
     }
     """
@@ -173,7 +174,7 @@ class EnhancedDiff(Vertical):
 
     def compose(self) -> ComposeResult:
         """Compose the diff widget layout."""
-        yield Static(f"[#71717a]{self._title}[/#71717a]", classes="diff-title")
+        yield Static(f"[#d0dbe7]{self._title}[/#d0dbe7]", classes="diff-title")
 
         formatted = format_diff_textual(self._diff, self._max_lines)
         yield Static(formatted, classes="diff-content")
@@ -182,7 +183,7 @@ class EnhancedDiff(Vertical):
         if additions or deletions:
             stats_parts = []
             if additions:
-                stats_parts.append(f"[#4ade80]+{additions}[/#4ade80]")
+                stats_parts.append(f"[#72d69f]+{additions}[/#72d69f]")
             if deletions:
-                stats_parts.append(f"[#f87171]-{deletions}[/#f87171]")
+                stats_parts.append(f"[#ff7a7a]-{deletions}[/#ff7a7a]")
             yield Static(" ".join(stats_parts), classes="diff-stats")

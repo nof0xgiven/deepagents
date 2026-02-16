@@ -72,23 +72,23 @@ class CompletionPopup(Static):
             self.hide()
             return
 
-        # Build clean spacious list
+        # Build clean, scan-friendly list for dense completion sets.
         lines = []
         for idx, (label, description) in enumerate(suggestions):
             is_selected = idx == selected_index
 
             if is_selected:
                 line = Text()
-                line.append("│ ", style="#00AEEF bold")
-                line.append(label, style="bold #00AEEF")
+                line.append("> ", style="#33bfff bold")
+                line.append(label, style="bold #eef4fb")
                 if description:
-                    line.append("  " + description, style="#71717a")
+                    line.append("  " + description, style="#b6c4d2")
             else:
                 line = Text()
                 line.append("  ")
-                line.append(label, style="#a1a1aa")
+                line.append(label, style="#d3dee9")
                 if description:
-                    line.append("  " + description, style="#52525b")
+                    line.append("  " + description, style="#91a1b1")
 
             lines.append(line)
 
@@ -120,8 +120,8 @@ class SlashCommandRow(Static):
 
     def set_content(self, label: str, description: str) -> None:
         if description:
-            padded = escape(label).ljust(18)
-            self.update(f"{padded} [dim]{escape(description)}[/dim]")
+            padded = escape(label).ljust(20)
+            self.update(f"{padded} [#9fb0c0]{escape(description)}[/#9fb0c0]")
         else:
             self.update(escape(label))
 
@@ -318,10 +318,11 @@ class ChatInput(Vertical):
     DEFAULT_CSS = """
     ChatInput {
         height: auto;
-        min-height: 3;
+        min-height: 4;
         max-height: 16;
         padding: 1 2;
-        background: #1c1c1c;
+        background: transparent;
+        border: solid #a7b4c2 42%;
     }
 
     ChatInput .input-row {
@@ -330,10 +331,10 @@ class ChatInput(Vertical):
     }
 
     ChatInput .input-prompt {
-        width: 3;
+        width: 2;
         height: 1;
-        padding: 0 1;
-        color: #3f3f46;
+        padding: 0;
+        color: #94a4b4;
     }
 
     ChatInput ChatTextArea {
@@ -344,7 +345,7 @@ class ChatInput(Vertical):
         border: none;
         background: transparent;
         padding: 0;
-        color: #e4e4e7;
+        color: #f4f8fc;
     }
 
     ChatInput ChatTextArea:focus {
@@ -643,9 +644,9 @@ class ChatInput(Vertical):
         except Exception:
             return
         if active:
-            prompt.styles.color = "#00AEEF"
+            prompt.styles.color = "#8cd8ff"
         else:
-            prompt.styles.color = "#3f3f46"
+            prompt.styles.color = "#94a4b4"
 
     # -- CompletionView protocol ---------------------------------------------
 

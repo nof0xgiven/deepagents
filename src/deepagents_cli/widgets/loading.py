@@ -63,17 +63,17 @@ class LoadingWidget(Static):
 
     LoadingWidget .loading-spinner {
         width: auto;
-        color: #71717a;
+        color: #8cd8ff;
     }
 
     LoadingWidget .loading-status {
         width: auto;
-        color: #71717a;
+        color: #d5e0eb;
     }
 
     LoadingWidget .loading-hint {
         width: auto;
-        color: #3f3f46;
+        color: #9fb0c0;
         margin-left: 1;
     }
     """
@@ -118,7 +118,7 @@ class LoadingWidget(Static):
 
         if self._spinner_widget:
             frame = self._spinner.next_frame()
-            self._spinner_widget.update(f"[#71717a]{frame}[/]")
+            self._spinner_widget.update(f"[#8cd8ff]{frame}[/]")
 
         if self._hint_widget and self._start_time is not None:
             elapsed = int(time() - self._start_time)
@@ -149,7 +149,7 @@ class LoadingWidget(Static):
         if self._hint_widget:
             self._hint_widget.update(f"(paused at {self._paused_elapsed}s)")
         if self._spinner_widget:
-            self._spinner_widget.update("[dim]⏸[/dim]")
+            self._spinner_widget.update("[#9fb0c0]||[/#9fb0c0]")
 
     def resume(self) -> None:
         """Resume the animation."""

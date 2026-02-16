@@ -84,7 +84,7 @@ class ApprovalMenu(Container):
         """
         # Title
         yield Static(
-            f"[#e4e4e7]{self._tool_name}[/#e4e4e7] [#71717a]requires approval[/#71717a]",
+            f"[#f4f8fc]{self._tool_name}[/#f4f8fc] [#b8c6d4]requires approval[/#b8c6d4]",
             classes="approval-title",
         )
 

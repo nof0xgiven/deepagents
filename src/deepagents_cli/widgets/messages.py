@@ -20,6 +20,13 @@ if TYPE_CHECKING:
 
 # Maximum number of tool arguments to display inline
 _MAX_INLINE_ARGS = 3
+_TEXT_PRIMARY = "#f4f8fc"
+_TEXT_SECONDARY = "#d0dbe7"
+_TEXT_MUTED = "#9aa8b7"
+_TEXT_HINT = "#8898a8"
+_ACCENT = "#8cd8ff"
+_SUCCESS = "#72d69f"
+_ERROR = "#ff7a7a"
 
 
 class UserMessage(Static):
@@ -47,8 +54,8 @@ class UserMessage(Static):
         """Compose the user message layout."""
         # Use Text object to combine styled prefix with unstyled user content
         text = Text()
-        text.append("> ", style="#3f3f46")
-        text.append(self._content, style="#e4e4e7")
+        text.append("> ", style=_TEXT_MUTED)
+        text.append(self._content, style=_TEXT_PRIMARY)
         yield Static(text)
 
 
@@ -64,7 +71,8 @@ class AssistantMessage(Vertical):
         height: auto;
         padding: 1 2;
         margin: 1 0;
-        background: #151515;
+        background: transparent;
+        border-left: solid #98a8b8 22%;
     }
 
     AssistantMessage Markdown {
@@ -157,16 +165,16 @@ class ToolCallMessage(Vertical):
     ToolCallMessage {
         height: auto;
         padding: 1 1;
-        margin: 0 0;
-        background: #151515;
+        margin: 1 0 0 0;
+        background: transparent;
     }
 
     ToolCallMessage .tool-header {
-        color: #71717a;
+        color: #d8e4f0;
     }
 
     ToolCallMessage .tool-args {
-        color: #3f3f46;
+        color: #9fb0c0;
         margin-left: 2;
     }
 
@@ -175,49 +183,50 @@ class ToolCallMessage(Vertical):
     }
 
     ToolCallMessage .tool-status.pending {
-        color: #71717a;
+        color: #a8b8c8;
     }
 
     ToolCallMessage .tool-status.success {
-        color: #71717a;
+        color: #9fb0c0;
     }
 
     ToolCallMessage .tool-status.error {
-        color: #ef4444;
+        color: #ff7a7a;
     }
 
     ToolCallMessage .tool-status.rejected {
-        color: #71717a;
+        color: #a8b8c8;
     }
 
     ToolCallMessage .tool-status.executing {
-        color: #71717a;
+        color: #8cd8ff;
     }
 
     ToolCallMessage .tool-output {
         margin-left: 2;
         margin-top: 1;
         padding: 1;
-        background: #151515;
-        color: #71717a;
+        background: transparent;
+        color: #d0dbe7;
+        border-left: solid #8cd8ff 45%;
         max-height: 20;
         overflow-y: auto;
     }
 
     ToolCallMessage .tool-output-preview {
         margin-left: 2;
-        color: #71717a;
+        color: #d0dbe7;
     }
 
     ToolCallMessage .tool-output-hint {
         margin-left: 2;
-        color: #3f3f46;
+        color: #8b99a8;
     }
     """
 
     # Max lines/chars to show in preview mode
-    _PREVIEW_LINES = 3
-    _PREVIEW_CHARS = 200
+    _PREVIEW_LINES = 6
+    _PREVIEW_CHARS = 420
 
     # Tools that show an executing indicator (long-running)
     _LONG_RUNNING_TOOLS = {"task"}
@@ -334,7 +343,7 @@ class ToolCallMessage(Vertical):
         self._output = error
         if self._status_widget:
             self._status_widget.add_class("error")
-            self._status_widget.update("[#ef4444]✗[/#ef4444]")
+            self._status_widget.update(f"[{_ERROR}]error[/{_ERROR}]")
             self._status_widget.display = True
         # Always show full error - errors should be visible
         self._expanded = True
@@ -346,7 +355,7 @@ class ToolCallMessage(Vertical):
         self._status = "rejected"
         if self._status_widget:
             self._status_widget.add_class("rejected")
-            self._status_widget.update("[#71717a]✗ rejected[/#71717a]")
+            self._status_widget.update(f"[{_TEXT_HINT}]rejected[/{_TEXT_HINT}]")
             self._status_widget.display = True
 
     def set_skipped(self) -> None:
@@ -355,7 +364,7 @@ class ToolCallMessage(Vertical):
         self._status = "skipped"
         if self._status_widget:
             self._status_widget.add_class("rejected")  # Use same styling as rejected
-            self._status_widget.update("[#3f3f46]- skipped[/#3f3f46]")
+            self._status_widget.update(f"[{_TEXT_MUTED}]skipped[/{_TEXT_MUTED}]")
             self._status_widget.display = True
 
     def toggle_output(self) -> None:
@@ -449,19 +458,19 @@ class DiffMessage(Static):
     }
 
     DiffMessage .diff-add {
-        color: #4ade80;
+        color: #72d69f;
     }
 
     DiffMessage .diff-remove {
-        color: #f87171;
+        color: #ff7a7a;
     }
 
     DiffMessage .diff-context {
-        color: #3f3f46;
+        color: #9aa8b7;
     }
 
     DiffMessage .diff-hunk {
-        color: #71717a;
+        color: #d0dbe7;
     }
     """
 
@@ -506,8 +515,8 @@ class ErrorMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to combine styled prefix with unstyled error content
-        text = Text("✗ ", style="#ef4444")
-        text.append(error, style="#ef4444")
+        text = Text("error ", style=_ERROR)
+        text.append(error, style=_ERROR)
         super().__init__(text, **kwargs)
 
 
@@ -519,7 +528,7 @@ class SystemMessage(Static):
         height: auto;
         padding: 0 1;
         margin: 1 0;
-        color: #3f3f46;
+        color: #9aa8b7;
     }
     """
 
@@ -531,4 +540,4 @@ class SystemMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to safely render message without markup parsing
-        super().__init__(Text(message, style="#3f3f46"), **kwargs)
+        super().__init__(Text(message, style=_TEXT_MUTED), **kwargs)

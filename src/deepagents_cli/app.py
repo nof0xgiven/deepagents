@@ -195,15 +195,15 @@ class DeepAgentsApp(App):
 
     def compose(self) -> ComposeResult:
         """Compose the application layout."""
-        # Main chat area with scrollable messages
-        # Spacer above content pushes welcome+input to bottom of viewport
+        # Main chat area with scrollable transcript.
         with VerticalScroll(id="chat"):
-            yield Static(id="chat-spacer")  # Pushes content to bottom
             yield WelcomeBanner(id="welcome-banner")
             yield Container(id="messages")
-            with Container(id="bottom-app-container"):
-                yield SlashCommandMenu(id="slash-command-menu")
-                yield ChatInput(cwd=self._cwd, id="input-area")
+
+        # Fixed input region above the footer/status row.
+        with Container(id="bottom-app-container"):
+            yield SlashCommandMenu(id="slash-command-menu")
+            yield ChatInput(cwd=self._cwd, id="input-area")
 
         # Status bar at bottom (yielded first so it claims the bottom edge)
         yield StatusBar(cwd=self._cwd, id="status-bar")
@@ -258,9 +258,6 @@ class DeepAgentsApp(App):
         self._chat_input.focus_input()
         self._chat_input.set_prompt_active(active=True)
 
-        # Size the spacer to fill remaining viewport below input
-        self.call_after_refresh(self._size_initial_spacer)
-
         # Load thread history if resuming a session
         if self._lc_thread_id and self._agent:
             self.call_after_refresh(lambda: asyncio.create_task(self._load_thread_history()))
@@ -289,12 +286,11 @@ class DeepAgentsApp(App):
     def _scroll_chat_to_bottom(self) -> None:
         """Scroll the chat area to the bottom.
 
-        Uses anchor() for smoother streaming - keeps scroll locked to bottom
-        as new content is added without causing visual jumps.
+        Uses a deterministic scroll-to-end to keep latest messages visible.
         """
         chat = self.query_one("#chat", VerticalScroll)
         if chat.virtual_size.height > chat.size.height:
-            chat.anchor()
+            chat.scroll_end(animate=False)
 
     async def _show_thinking(self) -> None:
         """Show or reposition the thinking spinner at the bottom of messages."""
@@ -362,12 +358,14 @@ class DeepAgentsApp(App):
 
     def _refresh_agents_pill(self) -> None:
         """Recalculate running-agent count for the badge."""
+        total = max(len(self._background_agent_tasks), len(self._stream_agent_namespaces))
         if self._agents_pill:
             # Background tasks and subagent stream namespaces can refer to the same
             # running subagent. Use the larger of the two active counts to avoid
             # double-counting overlap while still supporting stream-only signals.
-            total = max(len(self._background_agent_tasks), len(self._stream_agent_namespaces))
             self._agents_pill.count = total
+        if self._status_bar:
+            self._status_bar.set_agents(total)
 
     def _cleanup_background_tasks(self) -> None:
         """Cancel all running background tasks."""
@@ -376,39 +374,6 @@ class DeepAgentsApp(App):
         self._background_agent_tasks.clear()
         self._stream_agent_namespaces.clear()
         self._refresh_agents_pill()
-
-    def _size_initial_spacer(self) -> None:
-        """Size the spacer to fill remaining viewport below input."""
-        self._resize_spacer()
-
-    def _resize_spacer(self) -> None:
-        """Resize spacer to keep content bottom-aligned in viewport.
-
-        Calculates: spacer = max(0, viewport - content_height).
-        As messages accumulate the spacer shrinks; once content overflows
-        the spacer is 0 and we scroll to keep the input visible.
-        """
-        try:
-            spacer = self.query_one("#chat-spacer", Static)
-            chat = self.query_one("#chat", VerticalScroll)
-
-            # Sum outer heights of all chat children except the spacer
-            content_height = sum(
-                child.outer_size.height
-                for child in chat.children
-                if child.id != "chat-spacer"
-            )
-
-            # chat has padding: 2 3 → 2 top + 2 bottom = 4 vertical
-            available = chat.size.height - 4
-            remaining = max(0, available - content_height)
-            spacer.styles.height = remaining
-
-            # When content overflows viewport, scroll to keep input visible
-            if remaining == 0:
-                self._scroll_chat_to_bottom()
-        except NoMatches:
-            pass
 
     async def _request_approval(
         self,
@@ -493,10 +458,8 @@ class DeepAgentsApp(App):
             return
         if event.visible and event.suggestions:
             menu.update_suggestions(event.suggestions, event.selected_index)
-            self.call_after_refresh(self._resize_spacer)
         else:
             menu.hide_menu()
-            self.call_after_refresh(self._resize_spacer)
 
     async def on_approval_menu_decided(
         self,
@@ -912,8 +875,8 @@ class DeepAgentsApp(App):
         """
         messages = self.query_one("#messages", Container)
         await messages.mount(widget)
-        # Recalculate spacer after layout settles so content stays bottom-aligned
-        self.call_after_refresh(self._resize_spacer)
+        # Keep latest message visible after layout settles.
+        self.call_after_refresh(self._scroll_chat_to_bottom)
 
     async def _clear_messages(self) -> None:
         """Clear the messages area and cancel background tasks."""
@@ -1052,10 +1015,24 @@ class DeepAgentsApp(App):
         if self._pending_approval_widget:
             self._pending_approval_widget.action_select_reject()
 
-    def on_click(self, _event: Click) -> None:
-        """Handle clicks anywhere in the terminal to focus on the command line."""
+    def on_click(self, event: Click) -> None:
+        """Focus input when appropriate without stealing focus from active surfaces."""
         if not self._chat_input:
             return
+
+        # Never steal focus while a modal is active.
+        if self._model_controller.model_selector_open:
+            return
+
+        target = getattr(event, "widget", None)
+        if target is not None:
+            if target is self._chat_input or target in self._chat_input.walk_children():
+                return
+            if self._pending_approval_widget and (
+                target is self._pending_approval_widget
+                or target in self._pending_approval_widget.walk_children()
+            ):
+                return
 
         self.call_after_refresh(self._chat_input.focus_input)
 

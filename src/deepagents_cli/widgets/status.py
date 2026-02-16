@@ -23,14 +23,14 @@ class StatusBar(Horizontal):
     StatusBar {
         height: 1;
         dock: bottom;
-        background: #111111;
+        background: transparent;
         padding: 0 1;
     }
 
     StatusBar .status-mode {
         width: auto;
         padding: 0 1;
-        color: #3f3f46;
+        color: #b5c4d2;
     }
 
     StatusBar .status-mode.normal {
@@ -38,44 +38,63 @@ class StatusBar(Horizontal):
     }
 
     StatusBar .status-mode.bash {
-        color: #3f3f46;
+        color: #f4cf7e;
     }
 
     StatusBar .status-mode.command {
-        color: #3f3f46;
+        color: #9edfff;
     }
 
     StatusBar .status-separator {
         width: auto;
-        color: #3f3f46;
+        color: #9aa8b5;
     }
 
     StatusBar .status-auto-approve {
         width: auto;
         padding: 0 1;
-        color: #3f3f46;
+    }
+
+    StatusBar .status-auto-approve.auto {
+        color: #7cdca6;
+    }
+
+    StatusBar .status-auto-approve.manual {
+        color: #c3d0dd;
     }
 
     StatusBar .status-message {
         width: 1fr;
         padding: 0 1;
-        color: #3f3f46;
+        color: #d4dfeb;
     }
 
     StatusBar .status-message.thinking {
-        color: #71717a;
+        color: #9edfff;
+    }
+
+    StatusBar .status-cwd {
+        width: auto;
+        padding: 0 1;
+        color: #a8b7c6;
     }
 
     StatusBar .status-tokens {
         width: auto;
         padding: 0 1;
-        color: #3f3f46;
+        color: #c9d5e0;
+    }
+
+    StatusBar .status-agents {
+        width: auto;
+        padding: 0 1;
+        color: #c7d6e4;
     }
 
     StatusBar .status-model {
         width: auto;
         padding: 0 1;
-        color: #71717a;
+        color: #d9e6f2;
     }
     """
 
@@ -84,6 +103,7 @@ class StatusBar(Horizontal):
     auto_approve: reactive[bool] = reactive(default=False, init=False)
     cwd: reactive[str] = reactive("", init=False)
     tokens: reactive[int] = reactive(0, init=False)
+    agents: reactive[int] = reactive(0, init=False)
 
     def __init__(self, cwd: str | Path | None = None, **kwargs: Any) -> None:
         """Initialize the status bar.
@@ -103,14 +123,23 @@ class StatusBar(Horizontal):
         yield Static(" · ", classes="status-separator")
         yield Static(
             "manual",
-            classes="status-auto-approve",
+            classes="status-auto-approve manual",
             id="auto-approve-indicator",
         )
         yield Static(" · ", classes="status-separator")
         yield Static("", classes="status-message", id="status-message")
-        yield Static("", classes="status-tokens", id="tokens-display")
         yield Static(" · ", classes="status-separator")
-        yield Static(settings.model_name or "", classes="status-model", id="model-display")
+        yield Static("", classes="status-cwd", id="cwd-display")
+        yield Static(" · ", classes="status-separator")
+        yield Static("tokens: 0", classes="status-tokens", id="tokens-display")
+        yield Static(" · ", classes="status-separator")
+        yield Static("agents: 0", classes="status-agents", id="agents-display")
+        yield Static(" · ", classes="status-separator")
+        yield Static(
+            f"model: {settings.model_name or 'none'}",
+            classes="status-model",
+            id="model-display",
+        )
 
     def on_mount(self) -> None:
         """Set reactive values after mount to trigger watchers safely."""
@@ -140,10 +169,13 @@ class StatusBar(Horizontal):
             indicator = self.query_one("#auto-approve-indicator", Static)
         except NoMatches:
             return
+        indicator.remove_class("manual", "auto")
         if new_value:
             indicator.update("auto")
+            indicator.add_class("auto")
         else:
             indicator.update("manual")
+            indicator.add_class("manual")
 
     def watch_cwd(self, new_value: str) -> None:
         """Update cwd display when it changes."""
@@ -175,10 +207,19 @@ class StatusBar(Horizontal):
             # Try to use ~ for home directory
             home = Path.home()
             if path.is_relative_to(home):
-                return "~/" + str(path.relative_to(home))
+                formatted = "~/" + str(path.relative_to(home))
+                return self._truncate_cwd(formatted)
         except (ValueError, RuntimeError):
             pass
-        return str(path)
+        return self._truncate_cwd(str(path))
+
+    @staticmethod
+    def _truncate_cwd(cwd_text: str, max_len: int = 38) -> str:
+        """Truncate cwd for narrow terminals while keeping the tail visible."""
+        if len(cwd_text) <= max_len:
+            return cwd_text
+        tail_len = max_len - 3
+        return "..." + cwd_text[-tail_len:]
 
     def set_mode(self, mode: str) -> None:
         """Set the current input mode.
@@ -216,14 +257,11 @@ class StatusBar(Horizontal):
         except NoMatches:
             return
 
-        if count > 0:
-            # Format with K suffix for thousands
-            if count >= 1000:
-                display.update(f"{count / 1000:.1f}K tokens")
-            else:
-                display.update(f"{count} tokens")
+        # Format with K suffix for thousands.
+        if count >= 1000:
+            display.update(f"tokens: {count / 1000:.1f}K")
         else:
-            display.update("")
+            display.update(f"tokens: {count}")
 
     def set_tokens(self, count: int) -> None:
         """Set the token count.
@@ -243,7 +281,19 @@ class StatusBar(Horizontal):
             display = self.query_one("#model-display", Static)
         except NoMatches:
             return
-        display.update(model_name)
+        display.update(f"model: {model_name}")
+
+    def watch_agents(self, new_value: int) -> None:
+        """Update agent count display in footer."""
+        try:
+            display = self.query_one("#agents-display", Static)
+        except NoMatches:
+            return
+        display.update(f"agents: {new_value}")
+
+    def set_agents(self, count: int) -> None:
+        """Set running agents count."""
+        self.agents = max(0, count)
 
     def hide_tokens(self) -> None:
         """Hide the token display (e.g., during streaming)."""
@@ -252,4 +302,4 @@ class StatusBar(Horizontal):
             display = self.query_one("#tokens-display", Static)
         except NoMatches:
             return
-        display.update("")
+        display.update("tokens: --")

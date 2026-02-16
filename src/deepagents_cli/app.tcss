@@ -1,36 +1,33 @@
-/* Ghost Glass — DeepAgents CLI */
+/* DeepAgents CLI - terminal-native refreshed interface */
 
 Screen {
     layout: vertical;
     layers: base autocomplete modal;
-    background: #111111;
-    scrollbar-color: #3f3f46;
-    scrollbar-color-hover: #71717a;
-    scrollbar-color-active: #71717a;
-    scrollbar-background: #111111;
-    scrollbar-background-hover: #111111;
-    scrollbar-background-active: #111111;
-    scrollbar-size-vertical: 1;
+    background: transparent;
+    scrollbar-color: #9aa5b1 38%;
+    scrollbar-color-hover: #b4c0cc 62%;
+    scrollbar-color-active: #d5dde6 82%;
+    scrollbar-background: transparent;
+    scrollbar-background-hover: transparent;
+    scrollbar-background-active: transparent;
+    scrollbar-size-vertical: 0;
 }
 
 /* Chat area */
 #chat {
     height: 1fr;
-    padding: 2 3;
-    background: #111111;
-    scrollbar-color: #111111;
-    scrollbar-background: #111111;
-}
-
-#chat-spacer {
-    height: auto;
+    padding: 1 3 0 3;
+    background: transparent;
+    scrollbar-color: #9aa5b1 38%;
+    scrollbar-background: transparent;
+    scrollbar-size-vertical: 0;
 }
 
 /* Welcome banner */
 #welcome-banner {
     height: auto;
     margin-bottom: 1;
-    padding: 2 0;
+    padding: 1 0;
 }
 
 /* Messages area */
@@ -42,50 +39,53 @@ Screen {
 #bottom-app-container {
     height: auto;
     margin-top: 1;
-    padding: 0 0;
+    padding: 0;
+    border-top: solid #b8c4d0 18%;
+    background: transparent;
 }
 
 /* Input area */
 #input-area {
     height: auto;
-    min-height: 3;
-    max-height: 12;
+    min-height: 4;
+    max-height: 16;
 }
 
-/* Approval Menu */
+/* Approval menu */
 .approval-menu {
     height: auto;
     margin: 1 0;
     padding: 1 2;
-    background: #1c1c1c;
+    background: transparent;
+    border: solid #9fb0c0 38%;
 }
 
 .approval-menu .approval-title {
-    color: #e4e4e7;
+    color: #eef4fb;
     margin-bottom: 0;
 }
 
 .approval-menu .approval-info {
     height: auto;
-    color: #71717a;
+    color: #c3d0dc;
     margin-bottom: 1;
 }
 
 .approval-menu .approval-option {
     height: 1;
     padding: 0 1;
-    color: #71717a;
+    color: #c3d0dc;
 }
 
 .approval-menu .approval-option-selected {
-    background: #151515;
-    color: #e4e4e7;
-    border-left: thick #00AEEF;
+    background: #2a3743 48%;
+    color: #f4f8fc;
+    border-left: thick #33bfff;
 }
 
 .approval-menu .approval-help {
-    color: #3f3f46;
-    margin-top: 0;
+    color: #9aa6b2;
+    margin-top: 1;
     margin-bottom: 0;
 }
 
@@ -96,8 +96,9 @@ Screen {
     width: auto;
     margin: 0 0 0 1;
     padding: 0 1;
-    color: #a1a1aa;
-    background: #18181b;
+    color: #d7e4f0;
+    background: transparent;
+    border-left: solid #33bfff 40%;
     text-style: dim;
     display: none;
 }
@@ -107,7 +108,7 @@ Screen {
 }
 
 #agents-pill.pulse-on {
-    color: #d4d4d8;
+    color: #f4f8fc;
     text-style: none;
 }
 
@@ -116,6 +117,7 @@ Screen {
     height: 1;
     dock: bottom;
     margin-bottom: 0;
+    background: transparent;
 }
 
 /* Tool approval widgets */
@@ -124,50 +126,48 @@ Screen {
 }
 
 .approval-file-path {
-    color: #e4e4e7;
+    color: #f4f8fc;
 }
 
 .approval-description {
-    color: #71717a;
+    color: #c5d2de;
 }
 
 /* Diff styling */
 .diff-header {
     height: auto;
-    color: #71717a;
+    color: #d4e0eb;
 }
 
 .diff-removed {
     height: auto;
-    color: #f87171;
+    color: #ff7a7a;
     padding: 0 1;
 }
 
 .diff-added {
     height: auto;
-    color: #4ade80;
+    color: #72d69f;
     padding: 0 1;
 }
 
 .diff-range {
     height: auto;
-    color: #71717a;
+    color: #b4c1ce;
 }
 
 .diff-context {
     height: auto;
-    color: #3f3f46;
+    color: #9ba8b5;
     padding: 0 1;
 }
 
-/* Separator */
 .approval-menu .approval-separator {
     height: 1;
-    color: #3f3f46;
+    color: #8f9ba8;
     margin: 0;
 }
 
-/* Scrollable tool info */
 .approval-menu .tool-info-scroll {
     height: 10;
     margin-top: 0;
@@ -177,10 +177,9 @@ Screen {
     height: auto;
 }
 
-/* Options container */
 .approval-menu .approval-options-container {
     height: auto;
-    background: #1c1c1c;
+    background: transparent;
     padding: 0 1;
     margin-top: 0;
 }
@@ -190,92 +189,92 @@ Screen {
     display: none;
     width: 100%;
     height: auto;
-    max-height: 14;
+    max-height: 12;
+    margin: 0 0 1 0;
     padding: 0;
-    margin: 0 0 0 0;
-    background: #18181b;
-    border-top: solid #27272a;
-    border-bottom: solid #27272a;
-    scrollbar-size-vertical: 0;
+    background: transparent;
+    border: solid #aab6c3 42%;
+    scrollbar-size-vertical: 1;
     overflow-y: auto;
 }
 
 #slash-command-menu .slash-command-row {
-    height: 1;
+    height: 2;
     padding: 0 2;
-    color: #a1a1aa;
-    background: #18181b;
+    color: #c8d4df;
+    background: transparent;
 }
 
 #slash-command-menu .slash-command-row.selected {
-    color: #e4e4e7;
-    background: #27272a;
+    color: #f4f8fc;
+    background: #2c3a47 55%;
     text-style: bold;
 }
 
-/* Completion popup - clean and spacious */
+/* Completion popup */
 #completion-popup {
     height: auto;
-    max-height: 10;
+    max-height: 12;
     width: 1fr;
     margin-left: 5;
     margin-right: 2;
     margin-bottom: 1;
-    background: #18181b;
-    color: #e4e4e7;
-    border: solid #27272a;
+    background: transparent;
+    color: #eef4fb;
+    border: solid #aab6c3 45%;
     padding: 1 2;
     layer: autocomplete;
 }
 
-/* Toast notifications - ghost glass */
+/* Toast notifications */
 Toast {
-    background: #18181b;
-    color: #a1a1aa;
-    border-left: outer #3f3f46;
+    background: transparent;
+    color: #d6e2ee;
+    border-left: outer #7f93a8;
 }
 
 Toast.-information {
-    border-left: outer #00AEEF;
+    border-left: outer #33bfff;
 }
 
 Toast.-information .toast--title {
-    color: #00AEEF;
+    color: #8cd8ff;
 }
 
 Toast.-warning {
-    border-left: outer #fbbf24;
+    border-left: outer #f2c35c;
 }
 
 Toast.-warning .toast--title {
-    color: #fbbf24;
+    color: #f4cf7e;
 }
 
 Toast.-error {
-    border-left: outer #ef4444;
+    border-left: outer #ff6f6f;
 }
 
 Toast.-error .toast--title {
-    color: #ef4444;
+    color: #ff9999;
 }
 
-/* Model selector modal - ghost glass */
+/* Model selector modal */
 ModelSelectorScreen {
     align: center middle;
-    background: #09090b 85%;
+    background: transparent;
 }
 
 #model-selector-panel {
     layer: modal;
-    width: 90;
-    height: 32;
-    background: #18181b;
-    border: solid #27272a;
+    width: 94;
+    height: 34;
+    max-height: 90%;
+    background: transparent;
+    border: solid #aab6c3 52%;
     padding: 1 2;
 }
 
 #model-selector-title {
-    color: #e4e4e7;
+    color: #f4f8fc;
     margin-bottom: 1;
     text-align: center;
     text-style: bold;
@@ -284,23 +283,23 @@ ModelSelectorScreen {
 .model-selector-input {
     dock: top;
     margin-bottom: 1;
-    background: #27272a;
-    border: solid #3f3f46;
-    color: #e4e4e7;
+    background: transparent;
+    border: solid #98a6b5 52%;
+    color: #f4f8fc;
     height: 3;
     padding: 0 1;
 }
 
 .model-selector-input:focus {
-    border: solid #00AEEF;
+    border: solid #33bfff;
 }
 
 #model-selector-list {
     height: 1fr;
-    scrollbar-color: #3f3f46;
-    scrollbar-background: #18181b;
+    scrollbar-color: #9aa5b1 45%;
+    scrollbar-background: transparent;
     scrollbar-size-vertical: 1;
-    background: #18181b;
+    background: transparent;
     border: none;
 }
 
@@ -309,14 +308,14 @@ ModelSelectorScreen {
 }
 
 #model-selector-list > .option-list--option-highlighted {
-    background: #27272a;
-    color: #00AEEF;
+    background: #2d3a46 58%;
+    color: #f4f8fc;
     text-style: bold;
 }
 
 #model-selector-help {
     dock: bottom;
-    color: #52525b;
+    color: #a7b3bf;
     margin-top: 1;
     text-align: center;
     height: 1;

@@ -19,7 +19,7 @@ class AgentsPill(Static):
         width: auto;
         padding: 0 1;
         margin: 0 0 0 1;
-        color: #71717a;
+        color: #d7e4f0;
         text-style: dim;
     }
 
@@ -28,7 +28,7 @@ class AgentsPill(Static):
     }
 
     AgentsPill.pulse-on {
-        color: #a1a1aa;
+        color: #f4f8fc;
         text-style: none;
     }
     """
@@ -50,7 +50,7 @@ class AgentsPill(Static):
 
     def watch_count(self, count: int) -> None:
         if count > 0:
-            label = f"🤖 {count} agent{'s' if count != 1 else ''} working.."
+            label = f"agents {count} running"
             self.update(label)
             self.add_class("active")
             if self._pulse_timer:

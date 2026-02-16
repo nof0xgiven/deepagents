@@ -16,13 +16,14 @@ class WelcomeBanner(Static):
     DEFAULT_CSS = """
     WelcomeBanner {
         height: auto;
-        padding: 3 3;
+        padding: 2 2;
     }
     """
 
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the welcome banner."""
-        banner_text = "[#e4e4e7]deepagents[/#e4e4e7]  [#3f3f46]ready[/#3f3f46]\n\n"
+        banner_text = "[#f4f8fc]deepagents[/#f4f8fc]  [#9fb0c0]ready[/#9fb0c0]\n"
+        banner_text += "[#b9c7d5]type your task or use /help[/#b9c7d5]\n\n"
 
         # Show LangSmith status if tracing is enabled
         langsmith_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
@@ -36,7 +37,9 @@ class WelcomeBanner(Static):
                 or os.environ.get("LANGSMITH_PROJECT")
                 or "default"
             )
-            banner_text += f"[#3f3f46]tracing: {project}[/#3f3f46]\n"
+            banner_text += f"[#9fb0c0]tracing: {project}[/#9fb0c0]\n"
 
-        banner_text += "[#3f3f46]enter send · ctrl+j newline · @ files · / commands[/#3f3f46]"
+        banner_text += (
+            "[#8fa1b3]enter send · ctrl+j newline · @ files · / commands · esc interrupt[/#8fa1b3]"
+        )
         super().__init__(banner_text, **kwargs)

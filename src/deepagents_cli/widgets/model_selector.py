@@ -75,16 +75,16 @@ class ModelSelectorScreen(ModalScreen[ModelEntry | None]):
         
         # Star for favorites - subtle accent color
         if is_fav:
-            text.append("★ ", style="#00AEEF")
+            text.append("★ ", style="#8cd8ff")
         else:
             text.append("  ")
         
         # Name - white for active, gray for normal
-        name_style = "bold #e4e4e7" if is_active else "#a1a1aa"
+        name_style = "bold #f4f8fc" if is_active else "#d0dbe7"
         text.append(f"{entry.display_name:<28}", style=name_style)
         
-        # Provider - muted cyan
-        text.append(f"{entry.provider:<12}", style="#71717a")
+        # Provider metadata
+        text.append(f"{entry.provider:<12}", style="#aab8c6")
         
         # Details in subtle gray
         details = []
@@ -105,13 +105,13 @@ class ModelSelectorScreen(ModalScreen[ModelEntry | None]):
             details.append("ACTIVE")
 
         if details:
-            text.append("  " + " · ".join(details), style="#52525b")
+            text.append("  " + " · ".join(details), style="#8d9cab")
 
         return text
 
     def _format_header(self, title: str) -> Text:
-        """Format section headers with ghost-glass muted style."""
-        return Text(f"─ {title} ─", style="#3f3f46 dim")
+        """Format section headers with subtle separators."""
+        return Text(f"─ {title} ─", style="#9aa8b7 dim")
 
     def _refresh_list(self, query: str = "") -> None:
         option_list = self.query_one(OptionList)
@@ -125,7 +125,9 @@ class ModelSelectorScreen(ModalScreen[ModelEntry | None]):
             self._filtered_entries = matches
             
             if not matches:
-                option_list.add_option(Option(Text("No matches found", style="#52525b italic"), disabled=True))
+                option_list.add_option(
+                    Option(Text("No matches found", style="#9aa8b7 italic"), disabled=True)
+                )
                 return
 
             for entry in matches:

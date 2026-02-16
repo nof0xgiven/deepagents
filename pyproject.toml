@@ -54,3 +54,6 @@ include = ["deepagents_cli*"]
   "*.md",
   "*.tcss",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

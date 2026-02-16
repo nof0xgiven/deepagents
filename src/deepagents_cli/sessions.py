@@ -1,10 +1,13 @@
 """Thread management using LangGraph's built-in checkpoint persistence."""
 
+import contextlib
+import os
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import IO
 
 import aiosqlite
 from langgraph.store.base import BaseStore
@@ -48,6 +51,85 @@ def get_store_path() -> Path:
     db_dir = Path.home() / ".deepagents"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "store.db"
+
+
+def get_locks_dir() -> Path:
+    """Get directory for runtime locks (process-exclusive)."""
+    db_dir = Path.home() / ".deepagents"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    locks_dir = db_dir / "locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    return locks_dir
+
+
+class ThreadLockError(RuntimeError):
+    """Raised when a thread is already in use by another deepagents process."""
+
+
+def _thread_lock_env_enabled() -> bool:
+    value = os.environ.get("DEEPAGENTS_THREAD_LOCK", "1").strip().lower()
+    return value not in {"0", "false", "off", "no"}
+
+
+def _lock_file_nonblocking(f: IO[str]) -> None:
+    """Acquire an exclusive, non-blocking advisory lock on a file."""
+    if os.name == "nt":
+        # Best-effort Windows support (not used in our macOS setup).
+        import msvcrt  # type: ignore[import-not-found]
+
+        try:
+            # Lock 1 byte. On Windows, locks are mandatory for msvcrt but coarse.
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise BlockingIOError(str(exc)) from exc
+        return
+
+    import fcntl
+
+    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+@contextmanager
+def acquire_thread_lock(thread_id: str, *, enabled: bool = True) -> Iterator[None]:
+    """Prevent two interactive CLIs from writing to the same thread concurrently.
+
+    Without this, two terminals resuming the same `thread_id` can interleave durable
+    writes in `~/.deepagents/sessions.db`, which can look like "mirrored" subagent
+    activity across sessions.
+    """
+    if not enabled or not _thread_lock_env_enabled():
+        yield
+        return
+
+    lock_path = get_locks_dir() / f"thread-{thread_id}.lock"
+    f = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            _lock_file_nonblocking(f)
+        except BlockingIOError as exc:
+            raise ThreadLockError(
+                f"Thread '{thread_id}' is already active in another deepagents session "
+                f"(lock: {lock_path}). Close the other session, or start a new thread "
+                f"(omit -r/--resume)."
+            ) from exc
+
+        # Record ownership for debugging.
+        f.seek(0)
+        f.truncate()
+        f.write(f"pid={os.getpid()}\nthread_id={thread_id}\n")
+        f.flush()
+
+        yield
+    finally:
+        # Best-effort unlock/close. On POSIX, closing releases the lock.
+        try:
+            if os.name != "nt":
+                import fcntl
+
+                with contextlib.suppress(Exception):
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            with contextlib.suppress(Exception):
+                f.close()
 
 
 def generate_thread_id() -> str:

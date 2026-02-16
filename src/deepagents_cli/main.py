@@ -14,6 +14,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
@@ -36,6 +37,8 @@ from deepagents_cli.config import (
 from deepagents_cli.integrations.sandbox_factory import create_sandbox
 from deepagents_cli.mcp import open_mcp_tools
 from deepagents_cli.sessions import (
+    ThreadLockError,
+    acquire_thread_lock,
     delete_thread_command,
     generate_thread_id,
     get_checkpointer,
@@ -48,6 +51,9 @@ from deepagents_cli.sessions import (
 from deepagents_cli.skills import execute_skills_command, setup_skills_parser
 from deepagents_cli.tools import fast_apply, fetch_url, http_request, warp_grep, web_search
 from deepagents_cli.ui import show_help
+
+if TYPE_CHECKING:
+    from langgraph.pregel import Pregel
 
 
 def check_cli_dependencies() -> None:
@@ -156,6 +162,13 @@ def parse_args() -> argparse.Namespace:
         "--message",
         dest="initial_prompt",
         help="Initial prompt to auto-submit when session starts",
+    )
+    parser.add_argument(
+        "--no-thread-lock",
+        dest="no_thread_lock",
+        action="store_true",
+        default=False,
+        help="Disable exclusive thread locking (allows multiple sessions on the same thread_id).",
     )
 
     parser.add_argument(
@@ -460,23 +473,28 @@ def cli_main() -> None:
                 thread_id = generate_thread_id()
 
             # Run Textual CLI
-            asyncio.run(
-                run_textual_cli_async(
-                    assistant_id=args.agent,
-                    auto_approve=args.auto_approve,
-                    sandbox_type=args.sandbox,
-                    sandbox_id=args.sandbox_id,
-                    model_name=args.model,
-                    reasoning_effort=args.reasoning_effort,
-                    service_tier=args.service_tier,
-                    thread_id=thread_id,
-                    is_resumed=is_resumed,
-                    initial_prompt=args.initial_prompt,
-                    extensions=extensions,
-                    extensions_only=extensions_only,
-                    extensions_disabled=extensions_disabled,
-                )
-            )
+            try:
+                with acquire_thread_lock(thread_id, enabled=not args.no_thread_lock):
+                    asyncio.run(
+                        run_textual_cli_async(
+                            assistant_id=args.agent,
+                            auto_approve=args.auto_approve,
+                            sandbox_type=args.sandbox,
+                            sandbox_id=args.sandbox_id,
+                            model_name=args.model,
+                            reasoning_effort=args.reasoning_effort,
+                            service_tier=args.service_tier,
+                            thread_id=thread_id,
+                            is_resumed=is_resumed,
+                            initial_prompt=args.initial_prompt,
+                            extensions=extensions,
+                            extensions_only=extensions_only,
+                            extensions_disabled=extensions_disabled,
+                        )
+                    )
+            except ThreadLockError as e:
+                console.print(Text(str(e), style="red"))
+                sys.exit(1)
     except KeyboardInterrupt:
         # Clean exit on Ctrl+C - suppress ugly traceback
         console.print("\n\n[yellow]Interrupted[/yellow]")

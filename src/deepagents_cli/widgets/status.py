@@ -95,6 +95,7 @@ class StatusBar(Horizontal):
         super().__init__(**kwargs)
         # Store initial cwd - will be used in compose()
         self._initial_cwd = str(cwd) if cwd else str(Path.cwd())
+        self._tokens_hidden = False
 
     def compose(self) -> ComposeResult:
         """Compose the status bar layout."""
@@ -205,17 +206,22 @@ class StatusBar(Horizontal):
 
     def watch_tokens(self, new_value: int) -> None:
         """Update token display when count changes."""
+        self._tokens_hidden = False
+        self._render_tokens(new_value)
+
+    def _render_tokens(self, count: int) -> None:
+        """Render the token display regardless of reactive changes."""
         try:
             display = self.query_one("#tokens-display", Static)
         except NoMatches:
             return
 
-        if new_value > 0:
+        if count > 0:
             # Format with K suffix for thousands
-            if new_value >= 1000:
-                display.update(f"{new_value / 1000:.1f}K tokens")
+            if count >= 1000:
+                display.update(f"{count / 1000:.1f}K tokens")
             else:
-                display.update(f"{new_value} tokens")
+                display.update(f"{count} tokens")
         else:
             display.update("")
 
@@ -225,6 +231,10 @@ class StatusBar(Horizontal):
         Args:
             count: Current context token count
         """
+        if count == self.tokens and self._tokens_hidden:
+            self._tokens_hidden = False
+            self._render_tokens(count)
+            return
         self.tokens = count
 
     def set_model(self, model_name: str) -> None:
@@ -237,4 +247,9 @@ class StatusBar(Horizontal):
 
     def hide_tokens(self) -> None:
         """Hide the token display (e.g., during streaming)."""
-        self.query_one("#tokens-display", Static).update("")
+        self._tokens_hidden = True
+        try:
+            display = self.query_one("#tokens-display", Static)
+        except NoMatches:
+            return
+        display.update("")

@@ -50,7 +50,7 @@ class AgentsPill(Static):
 
     def watch_count(self, count: int) -> None:
         if count > 0:
-            label = f"🤖 {count} agent{'s' if count != 1 else ''}"
+            label = f"🤖 {count} agent{'s' if count != 1 else ''} working.."
             self.update(label)
             self.add_class("active")
             if self._pulse_timer:

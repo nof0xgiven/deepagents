@@ -166,6 +166,8 @@ class DeepAgentsApp(App):
             **kwargs: Additional arguments passed to parent
         """
         super().__init__(**kwargs)
+        self.theme = "textual-ansi"
+        self.ansi_color = True
         self._agent = agent
         self._assistant_id = assistant_id
         self._backend = backend

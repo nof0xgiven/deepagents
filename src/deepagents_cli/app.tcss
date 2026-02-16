@@ -78,7 +78,7 @@ Screen {
 }
 
 .approval-menu .approval-option-selected {
-    background: #2a3743 48%;
+    background: transparent;
     color: #f4f8fc;
     border-left: thick #33bfff;
 }
@@ -207,7 +207,7 @@ Screen {
 
 #slash-command-menu .slash-command-row.selected {
     color: #f4f8fc;
-    background: #2c3a47 55%;
+    background: transparent;
     text-style: bold;
 }
 
@@ -308,7 +308,7 @@ ModelSelectorScreen {
 }
 
 #model-selector-list > .option-list--option-highlighted {
-    background: #2d3a46 58%;
+    background: transparent;
     color: #f4f8fc;
     text-style: bold;
 }

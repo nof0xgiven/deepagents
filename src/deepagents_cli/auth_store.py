@@ -19,10 +19,12 @@ _KNOWN_TOKEN_URLS: dict[str, str] = {
     "anthropic": "https://console.anthropic.com/v1/oauth/token",
     "google": "https://oauth2.googleapis.com/token",
     "google-gemini-cli": "https://oauth2.googleapis.com/token",
+    "openai-codex": "https://auth.openai.com/oauth/token",
 }
 
 _KNOWN_CLIENT_IDS: dict[str, str] = {
     "anthropic": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+    "openai-codex": "app_EMoamEEZ73f0CkXaXp7hrann",
 }
 
 # Providers whose token endpoints require JSON body instead of form-encoded.

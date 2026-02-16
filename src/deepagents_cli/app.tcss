@@ -35,6 +35,12 @@ Screen {
     height: auto;
 }
 
+/* Inline markdown code chips */
+Markdown MarkdownBlock > .code_inline {
+    background: #f2c35c 18%;
+    color: #f4cf7e;
+}
+
 /* Bottom app container */
 #bottom-app-container {
     height: auto;

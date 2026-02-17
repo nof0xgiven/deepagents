@@ -278,7 +278,7 @@ Toast.-error .toast--title {
 /* Model selector modal */
 ModelSelectorScreen {
     align: center middle;
-    background: transparent;
+    background: #000000 75%;
 }
 
 #model-selector-panel {

@@ -14,6 +14,26 @@ def truncate_value(value: str, max_length: int = MAX_ARG_LENGTH) -> str:
     return value
 
 
+_STATUS_INDICATORS = {
+    "completed": "[x]",
+    "in_progress": "[>]",
+    "pending": "[ ]",
+}
+
+
+def format_todos_checklist(todos: list[dict[str, str]]) -> str:
+    """Format a list of todo items as a human-readable checklist."""
+    if not todos:
+        return "(empty todo list)"
+    lines = []
+    for item in todos:
+        content = item.get("content", "")
+        status = item.get("status", "pending")
+        indicator = _STATUS_INDICATORS.get(status, "[ ]")
+        lines.append(f"{indicator} {content}")
+    return "\n".join(lines)
+
+
 def format_tool_display(tool_name: str, tool_args: dict) -> str:
     """Format tool calls for display with tool-specific smart formatting.
 

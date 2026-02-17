@@ -11,7 +11,7 @@ from textual.timer import Timer
 from textual.widgets import Markdown, Static
 from textual.widgets._markdown import MarkdownStream
 
-from deepagents_cli.ui import format_tool_display
+from deepagents_cli.ui import format_todos_checklist, format_tool_display
 from deepagents_cli.widgets.diff import format_diff_textual
 from deepagents_cli.widgets.loading import BrailleSpinner
 
@@ -328,8 +328,10 @@ class ToolCallMessage(Vertical):
         """
         self._stop_executing()
         self._status = "success"
-        self._output = result
-        # No status label for success - just show output
+        if self._tool_name == "write_todos" and "todos" in self._args:
+            self._output = format_todos_checklist(self._args["todos"])
+        else:
+            self._output = result
         self._update_output_display()
 
     def set_error(self, error: str) -> None:
@@ -433,6 +435,8 @@ class ToolCallMessage(Vertical):
 
     def _filtered_args(self) -> dict[str, Any]:
         """Filter large tool args for display."""
+        if self._tool_name == "write_todos":
+            return {}
         if self._tool_name not in {"write_file", "edit_file"}:
             return self._args
 

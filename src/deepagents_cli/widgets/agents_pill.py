@@ -5,6 +5,8 @@ from __future__ import annotations
 from textual.reactive import reactive
 from textual.widgets import Static
 
+from deepagents_cli import theme
+
 
 class AgentsPill(Static):
     """Subtle pill that shows the number of running background agents.
@@ -19,7 +21,7 @@ class AgentsPill(Static):
         width: auto;
         padding: 0 1;
         margin: 0 0 0 1;
-        color: #d7e4f0;
+        color: #d0dbe7;
         text-style: dim;
     }
 
@@ -50,7 +52,7 @@ class AgentsPill(Static):
 
     def watch_count(self, count: int) -> None:
         if count > 0:
-            label = f"agents {count} running"
+            label = f"[{theme.ACCENT}]\u25cf[/{theme.ACCENT}] agents: {count} running"
             self.update(label)
             self.add_class("active")
             if self._pulse_timer:

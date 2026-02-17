@@ -29,11 +29,13 @@ from rich.text import Text
 
 from textual import events  # noqa: TC002 - used at runtime in _on_key
 from textual.binding import Binding
+from textual.color import Color
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import Static, TextArea
 
+from deepagents_cli import theme
 from deepagents_cli.widgets.autocomplete import (
     SLASH_COMMANDS,
     CompletionResult,
@@ -49,6 +51,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Completion popup
 # ---------------------------------------------------------------------------
+
 
 class CompletionPopup(Static):
     """Popup widget that displays completion suggestions."""
@@ -66,7 +69,9 @@ class CompletionPopup(Static):
         super().__init__("", **kwargs)
         self.can_focus = False
 
-    def update_suggestions(self, suggestions: list[tuple[str, str]], selected_index: int) -> None:
+    def update_suggestions(
+        self, suggestions: list[tuple[str, str]], selected_index: int
+    ) -> None:
         """Update the popup with new suggestions."""
         if not suggestions:
             self.hide()
@@ -109,6 +114,7 @@ class CompletionPopup(Static):
 # ---------------------------------------------------------------------------
 # Slash command menu
 # ---------------------------------------------------------------------------
+
 
 class SlashCommandRow(Static):
     """Single row in the slash command menu."""
@@ -312,6 +318,7 @@ class ChatTextArea(TextArea):
 # submission and history navigation.
 # ---------------------------------------------------------------------------
 
+
 class ChatInput(Vertical):
     """Chat input widget with autocomplete – popup floats above."""
 
@@ -334,7 +341,7 @@ class ChatInput(Vertical):
         width: 2;
         height: 1;
         padding: 0;
-        color: #94a4b4;
+        color: #8898a8;
     }
 
     ChatInput ChatTextArea {
@@ -414,7 +421,7 @@ class ChatInput(Vertical):
         """Compose layout – popup first so it stacks above input."""
         yield CompletionPopup(id="completion-popup")
         with Horizontal(classes="input-row"):
-            yield Static(">", classes="input-prompt", id="prompt")
+            yield Static("\u276f", classes="input-prompt", id="prompt")
             yield ChatTextArea(id="chat-input")
 
     def on_mount(self) -> None:
@@ -564,7 +571,9 @@ class ChatInput(Vertical):
 
     # -- History messages (bubbled from ChatTextArea) -------------------------
 
-    def on_chat_text_area_history_previous(self, event: ChatTextArea.HistoryPrevious) -> None:
+    def on_chat_text_area_history_previous(
+        self, event: ChatTextArea.HistoryPrevious
+    ) -> None:
         entry = self._history.get_previous(event.current_text)
         if entry is not None and self._text_area:
             self._text_area.set_text_from_history(entry)
@@ -599,6 +608,7 @@ class ChatInput(Vertical):
     # -- Reactive watchers ---------------------------------------------------
 
     def watch_mode(self, mode: str) -> None:
+        self._update_prompt_symbol()
         self.post_message(self.ModeChanged(mode))
 
     # -- Public API ----------------------------------------------------------
@@ -643,10 +653,37 @@ class ChatInput(Vertical):
             prompt = self.query_one("#prompt", Static)
         except Exception:
             return
+        self._update_prompt_symbol(prompt)
         if active:
-            prompt.styles.color = "#8cd8ff"
+            border_color = Color.parse(theme.ACCENT).with_alpha(0.55)
+            self.styles.border = ("solid", border_color)
+            # Set prompt color based on mode
+            if self.mode == "bash":
+                prompt.styles.color = theme.WARNING
+            elif self.mode == "command":
+                prompt.styles.color = theme.ACCENT_DIM
+            else:
+                prompt.styles.color = theme.ACCENT_DIM
         else:
-            prompt.styles.color = "#94a4b4"
+            border_color = Color.parse(theme.BORDER_DIM).with_alpha(0.25)
+            self.styles.border = ("solid", border_color)
+            prompt.styles.color = theme.HINT
+            if self._text_area:
+                self._text_area.cursor_blink = False
+
+    def _update_prompt_symbol(self, prompt: Static | None = None) -> None:
+        """Update prompt character based on current mode."""
+        if prompt is None:
+            try:
+                prompt = self.query_one("#prompt", Static)
+            except Exception:
+                return
+        if self.mode == "bash":
+            prompt.update("!")
+        elif self.mode == "command":
+            prompt.update("/")
+        else:
+            prompt.update("\u276f")  # ❯
 
     # -- CompletionView protocol ---------------------------------------------
 
@@ -692,7 +729,9 @@ class ChatInput(Vertical):
     def _move_slash_selection(self, delta: int) -> None:
         if not self._slash_suggestions:
             return
-        self._slash_selected_index = (self._slash_selected_index + delta) % len(self._slash_suggestions)
+        self._slash_selected_index = (self._slash_selected_index + delta) % len(
+            self._slash_suggestions
+        )
         self._render_slash_menu()
 
     def _apply_selected_slash(self, *, add_trailing_space: bool) -> bool:
@@ -729,7 +768,9 @@ class ChatInput(Vertical):
         if suggestions != self._slash_suggestions:
             self._slash_selected_index = 0
         else:
-            self._slash_selected_index = min(self._slash_selected_index, len(suggestions) - 1)
+            self._slash_selected_index = min(
+                self._slash_selected_index, len(suggestions) - 1
+            )
 
         self._slash_suggestions = suggestions
         self._slash_query_start = start
@@ -737,7 +778,9 @@ class ChatInput(Vertical):
         self._slash_visible = True
         self._render_slash_menu()
 
-    def _get_slash_query_context(self, text: str, cursor_offset: int) -> tuple[int, int, str] | None:
+    def _get_slash_query_context(
+        self, text: str, cursor_offset: int
+    ) -> tuple[int, int, str] | None:
         if not text:
             return None
 
@@ -800,7 +843,11 @@ class ChatInput(Vertical):
         suffix = text[end:]
 
         insertion = replacement
-        if add_trailing_space and not replacement.endswith("/") and not suffix.startswith(" "):
+        if (
+            add_trailing_space
+            and not replacement.endswith("/")
+            and not suffix.startswith(" ")
+        ):
             insertion = replacement + " "
 
         new_text = f"{prefix}{insertion}{suffix}"

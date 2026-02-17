@@ -11,6 +11,7 @@ from textual.timer import Timer
 from textual.widgets import Markdown, Static
 from textual.widgets._markdown import MarkdownStream
 
+from deepagents_cli import theme
 from deepagents_cli.ui import format_todos_checklist, format_tool_display
 from deepagents_cli.widgets.diff import format_diff_textual
 from deepagents_cli.widgets.loading import BrailleSpinner
@@ -20,13 +21,6 @@ if TYPE_CHECKING:
 
 # Maximum number of tool arguments to display inline
 _MAX_INLINE_ARGS = 3
-_TEXT_PRIMARY = "#f4f8fc"
-_TEXT_SECONDARY = "#d0dbe7"
-_TEXT_MUTED = "#9aa8b7"
-_TEXT_HINT = "#8898a8"
-_ACCENT = "#8cd8ff"
-_SUCCESS = "#72d69f"
-_ERROR = "#ff7a7a"
 
 
 class UserMessage(Static):
@@ -35,8 +29,9 @@ class UserMessage(Static):
     DEFAULT_CSS = """
     UserMessage {
         height: auto;
-        padding: 0 1;
+        padding: 1 2;
         margin: 1 0;
+        border-left: thick #33bfff;
     }
     """
 
@@ -54,8 +49,8 @@ class UserMessage(Static):
         """Compose the user message layout."""
         # Use Text object to combine styled prefix with unstyled user content
         text = Text()
-        text.append("> ", style=_TEXT_MUTED)
-        text.append(self._content, style=_TEXT_PRIMARY)
+        text.append("❯ ", style=theme.ACCENT)
+        text.append(self._content, style=theme.PRIMARY)
         yield Static(text)
 
 
@@ -72,7 +67,7 @@ class AssistantMessage(Vertical):
         padding: 1 2;
         margin: 1 0;
         background: transparent;
-        border-left: solid #98a8b8 22%;
+        border-left: solid #98a8b8 45%;
     }
 
     AssistantMessage Markdown {
@@ -170,11 +165,11 @@ class ToolCallMessage(Vertical):
     }
 
     ToolCallMessage .tool-header {
-        color: #d8e4f0;
+        color: #d0dbe7;
     }
 
     ToolCallMessage .tool-args {
-        color: #9fb0c0;
+        color: #9aa8b7;
         margin-left: 2;
     }
 
@@ -183,11 +178,11 @@ class ToolCallMessage(Vertical):
     }
 
     ToolCallMessage .tool-status.pending {
-        color: #a8b8c8;
+        color: #8898a8;
     }
 
     ToolCallMessage .tool-status.success {
-        color: #9fb0c0;
+        color: #9aa8b7;
     }
 
     ToolCallMessage .tool-status.error {
@@ -195,7 +190,7 @@ class ToolCallMessage(Vertical):
     }
 
     ToolCallMessage .tool-status.rejected {
-        color: #a8b8c8;
+        color: #8898a8;
     }
 
     ToolCallMessage .tool-status.executing {
@@ -220,13 +215,13 @@ class ToolCallMessage(Vertical):
 
     ToolCallMessage .tool-output-hint {
         margin-left: 2;
-        color: #8b99a8;
+        color: #8898a8;
     }
     """
 
     # Max lines/chars to show in preview mode
-    _PREVIEW_LINES = 6
-    _PREVIEW_CHARS = 420
+    _PREVIEW_LINES = 8
+    _PREVIEW_CHARS = 560
 
     # Tools that show an executing indicator (long-running)
     _LONG_RUNNING_TOOLS = {"task"}
@@ -251,6 +246,7 @@ class ToolCallMessage(Vertical):
         self._output: str = ""
         self._expanded: bool = False
         # Widget references (set in on_mount)
+        self._header_widget: Static | None = None
         self._status_widget: Static | None = None
         self._preview_widget: Static | None = None
         self._hint_widget: Static | None = None
@@ -260,29 +256,55 @@ class ToolCallMessage(Vertical):
         self._executing_start_time: float = 0.0
         self._spinner: BrailleSpinner | None = None
 
+    # Status icon mapping
+    _STATUS_ICONS = {
+        "pending": f"[{theme.HINT}]\u25c6[/{theme.HINT}]",  # ◆ dim
+        "success": f"[{theme.SUCCESS}]\u2713[/{theme.SUCCESS}]",  # ✓ green
+        "error": f"[{theme.ERROR}]\u2717[/{theme.ERROR}]",  # ✗ red
+        "rejected": f"[{theme.HINT}]\u25cb[/{theme.HINT}]",  # ○ muted
+        "skipped": f"[{theme.MUTED}]\u25cb[/{theme.MUTED}]",  # ○ muted
+    }
+
     def compose(self) -> ComposeResult:
         """Compose the tool call message layout."""
         tool_label = format_tool_display(self._tool_name, self._args)
+        icon = self._STATUS_ICONS["pending"]
         yield Static(
-            f"{tool_label}",
+            f"{icon} {tool_label}",
             classes="tool-header",
+            id="tool-header",
         )
         args = self._filtered_args()
         if args:
-            args_str = ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:_MAX_INLINE_ARGS])
+            args_str = ", ".join(
+                f"{k}={v!r}" for k, v in list(args.items())[:_MAX_INLINE_ARGS]
+            )
             if len(args) > _MAX_INLINE_ARGS:
                 args_str += ", ..."
             yield Static(f"({args_str})", classes="tool-args")
-        # Status - hidden by default, only shown for errors/rejections
+        # Status - hidden by default, only shown for errors/rejections or executing
         yield Static("", classes="tool-status", id="status")
         # Output area - hidden initially, shown when output is set
         # Use markup=False for output content to prevent Rich markup injection
-        yield Static("", classes="tool-output-preview", id="output-preview", markup=False)
-        yield Static("", classes="tool-output-hint", id="output-hint")  # hint uses our markup
+        yield Static(
+            "", classes="tool-output-preview", id="output-preview", markup=False
+        )
+        yield Static(
+            "", classes="tool-output-hint", id="output-hint"
+        )  # hint uses our markup
         yield Static("", classes="tool-output", id="output-full", markup=False)
+
+    def _update_header_icon(self, status: str) -> None:
+        """Update the inline status icon in the tool header."""
+        if self._header_widget is None:
+            return
+        icon = self._STATUS_ICONS.get(status, self._STATUS_ICONS["pending"])
+        tool_label = format_tool_display(self._tool_name, self._args)
+        self._header_widget.update(f"{icon} {tool_label}")
 
     def on_mount(self) -> None:
         """Cache widget references and hide status/output areas initially."""
+        self._header_widget = self.query_one("#tool-header", Static)
         self._status_widget = self.query_one("#status", Static)
         self._preview_widget = self.query_one("#output-preview", Static)
         self._hint_widget = self.query_one("#output-hint", Static)
@@ -299,7 +321,9 @@ class ToolCallMessage(Vertical):
         self._executing_start_time = time()
         self._spinner = BrailleSpinner()
         if self._status_widget:
-            self._status_widget.update(f"{self._spinner.current_frame()} working... (0s)")
+            self._status_widget.update(
+                f"{self._spinner.current_frame()} working... (0s)"
+            )
             self._status_widget.add_class("executing")
             self._status_widget.display = True
         self._executing_timer = self.set_interval(0.1, self._update_executing)
@@ -328,6 +352,7 @@ class ToolCallMessage(Vertical):
         """
         self._stop_executing()
         self._status = "success"
+        self._update_header_icon("success")
         if self._tool_name == "write_todos" and "todos" in self._args:
             self._output = format_todos_checklist(self._args["todos"])
         else:
@@ -342,10 +367,11 @@ class ToolCallMessage(Vertical):
         """
         self._stop_executing()
         self._status = "error"
+        self._update_header_icon("error")
         self._output = error
         if self._status_widget:
             self._status_widget.add_class("error")
-            self._status_widget.update(f"[{_ERROR}]error[/{_ERROR}]")
+            self._status_widget.update(f"[{theme.ERROR}]error[/{theme.ERROR}]")
             self._status_widget.display = True
         # Always show full error - errors should be visible
         self._expanded = True
@@ -355,18 +381,20 @@ class ToolCallMessage(Vertical):
         """Mark the tool call as rejected by user."""
         self._stop_executing()
         self._status = "rejected"
+        self._update_header_icon("rejected")
         if self._status_widget:
             self._status_widget.add_class("rejected")
-            self._status_widget.update(f"[{_TEXT_HINT}]rejected[/{_TEXT_HINT}]")
+            self._status_widget.update(f"[{theme.HINT}]rejected[/{theme.HINT}]")
             self._status_widget.display = True
 
     def set_skipped(self) -> None:
         """Mark the tool call as skipped (due to another rejection)."""
         self._stop_executing()
         self._status = "skipped"
+        self._update_header_icon("skipped")
         if self._status_widget:
             self._status_widget.add_class("rejected")  # Use same styling as rejected
-            self._status_widget.update(f"[{_TEXT_MUTED}]skipped[/{_TEXT_MUTED}]")
+            self._status_widget.update(f"[{theme.MUTED}]skipped[/{theme.MUTED}]")
             self._status_widget.display = True
 
     def toggle_output(self) -> None:
@@ -391,7 +419,9 @@ class ToolCallMessage(Vertical):
         total_chars = len(output_stripped)
 
         # Truncate if too many lines OR too many characters
-        needs_truncation = total_lines > self._PREVIEW_LINES or total_chars > self._PREVIEW_CHARS
+        needs_truncation = (
+            total_lines > self._PREVIEW_LINES or total_chars > self._PREVIEW_CHARS
+        )
 
         if self._expanded:
             # Show full output
@@ -506,8 +536,10 @@ class ErrorMessage(Static):
     DEFAULT_CSS = """
     ErrorMessage {
         height: auto;
-        padding: 0 1;
+        padding: 1 2;
         margin: 1 0;
+        border-left: thick #ff7a7a;
+        background: #ff7a7a 8%;
     }
     """
 
@@ -519,8 +551,8 @@ class ErrorMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to combine styled prefix with unstyled error content
-        text = Text("error ", style=_ERROR)
-        text.append(error, style=_ERROR)
+        text = Text("error ", style=theme.ERROR)
+        text.append(error, style=theme.ERROR)
         super().__init__(text, **kwargs)
 
 
@@ -530,9 +562,10 @@ class SystemMessage(Static):
     DEFAULT_CSS = """
     SystemMessage {
         height: auto;
-        padding: 0 1;
+        padding: 0 2;
         margin: 1 0;
         color: #9aa8b7;
+        border-left: solid #9aa8b7 25%;
     }
     """
 
@@ -544,4 +577,4 @@ class SystemMessage(Static):
             **kwargs: Additional arguments passed to parent
         """
         # Use Text object to safely render message without markup parsing
-        super().__init__(Text(message, style=_TEXT_MUTED), **kwargs)
+        super().__init__(Text(message, style=theme.MUTED), **kwargs)

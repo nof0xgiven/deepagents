@@ -30,7 +30,7 @@ class StatusBar(Horizontal):
     StatusBar .status-mode {
         width: auto;
         padding: 0 1;
-        color: #b5c4d2;
+        color: #d0dbe7;
     }
 
     StatusBar .status-mode.normal {
@@ -42,12 +42,7 @@ class StatusBar(Horizontal):
     }
 
     StatusBar .status-mode.command {
-        color: #9edfff;
-    }
-
-    StatusBar .status-separator {
-        width: auto;
-        color: #9aa8b5;
+        color: #8cd8ff;
     }
 
     StatusBar .status-auto-approve {
@@ -56,52 +51,45 @@ class StatusBar(Horizontal):
     }
 
     StatusBar .status-auto-approve.auto {
-        color: #7cdca6;
+        color: #72d69f;
     }
 
     StatusBar .status-auto-approve.manual {
-        color: #c3d0dd;
+        color: #d0dbe7;
     }
 
     StatusBar .status-message {
         width: 1fr;
         padding: 0 1;
-        color: #d4dfeb;
+        color: #d0dbe7;
     }
 
     StatusBar .status-message.thinking {
-        color: #9edfff;
-    }
-
-    StatusBar .status-cwd {
-        width: auto;
-        padding: 0 1;
-        color: #a8b7c6;
+        color: #8cd8ff;
     }
 
     StatusBar .status-tokens {
         width: auto;
         padding: 0 1;
-        color: #c9d5e0;
+        color: #d0dbe7;
     }
 
     StatusBar .status-agents {
         width: auto;
         padding: 0 1;
-        color: #c7d6e4;
+        color: #d0dbe7;
     }
 
     StatusBar .status-model {
         width: auto;
         padding: 0 1;
-        color: #d9e6f2;
+        color: #d0dbe7;
     }
     """
 
     mode: reactive[str] = reactive("normal", init=False)
     status_message: reactive[str] = reactive("", init=False)
     auto_approve: reactive[bool] = reactive(default=False, init=False)
-    cwd: reactive[str] = reactive("", init=False)
     tokens: reactive[int] = reactive(0, init=False)
     agents: reactive[int] = reactive(0, init=False)
 
@@ -113,37 +101,27 @@ class StatusBar(Horizontal):
             **kwargs: Additional arguments passed to parent
         """
         super().__init__(**kwargs)
-        # Store initial cwd - will be used in compose()
-        self._initial_cwd = str(cwd) if cwd else str(Path.cwd())
         self._tokens_hidden = False
 
     def compose(self) -> ComposeResult:
         """Compose the status bar layout."""
+        # Left group: mode + auto-approve
         yield Static("", classes="status-mode normal", id="mode-indicator")
-        yield Static(" · ", classes="status-separator")
         yield Static(
             "manual",
             classes="status-auto-approve manual",
             id="auto-approve-indicator",
         )
-        yield Static(" · ", classes="status-separator")
+        # Center: status message (flexible width)
         yield Static("", classes="status-message", id="status-message")
-        yield Static(" · ", classes="status-separator")
-        yield Static("", classes="status-cwd", id="cwd-display")
-        yield Static(" · ", classes="status-separator")
+        # Right group: tokens | agents | model
         yield Static("tokens: 0", classes="status-tokens", id="tokens-display")
-        yield Static(" · ", classes="status-separator")
-        yield Static("agents: 0", classes="status-agents", id="agents-display")
-        yield Static(" · ", classes="status-separator")
+        yield Static("", classes="status-agents", id="agents-display")
         yield Static(
             f"model: {settings.model_name or 'none'}",
             classes="status-model",
             id="model-display",
         )
-
-    def on_mount(self) -> None:
-        """Set reactive values after mount to trigger watchers safely."""
-        self.cwd = self._initial_cwd
 
     def watch_mode(self, mode: str) -> None:
         """Update mode indicator when mode changes."""
@@ -177,14 +155,6 @@ class StatusBar(Horizontal):
             indicator.update("manual")
             indicator.add_class("manual")
 
-    def watch_cwd(self, new_value: str) -> None:
-        """Update cwd display when it changes."""
-        try:
-            display = self.query_one("#cwd-display", Static)
-        except NoMatches:
-            return
-        display.update(self._format_cwd(new_value))
-
     def watch_status_message(self, new_value: str) -> None:
         """Update status message display."""
         try:
@@ -199,27 +169,6 @@ class StatusBar(Horizontal):
                 msg_widget.add_class("thinking")
         else:
             msg_widget.update("")
-
-    def _format_cwd(self, cwd_path: str = "") -> str:
-        """Format the current working directory for display."""
-        path = Path(cwd_path or self.cwd or self._initial_cwd)
-        try:
-            # Try to use ~ for home directory
-            home = Path.home()
-            if path.is_relative_to(home):
-                formatted = "~/" + str(path.relative_to(home))
-                return self._truncate_cwd(formatted)
-        except (ValueError, RuntimeError):
-            pass
-        return self._truncate_cwd(str(path))
-
-    @staticmethod
-    def _truncate_cwd(cwd_text: str, max_len: int = 38) -> str:
-        """Truncate cwd for narrow terminals while keeping the tail visible."""
-        if len(cwd_text) <= max_len:
-            return cwd_text
-        tail_len = max_len - 3
-        return "..." + cwd_text[-tail_len:]
 
     def set_mode(self, mode: str) -> None:
         """Set the current input mode.
@@ -289,7 +238,12 @@ class StatusBar(Horizontal):
             display = self.query_one("#agents-display", Static)
         except NoMatches:
             return
-        display.update(f"agents: {new_value}")
+        if new_value > 0:
+            display.update(f"agents: {new_value}")
+            display.styles.display = "block"
+        else:
+            display.update("")
+            display.styles.display = "none"
 
     def set_agents(self, count: int) -> None:
         """Set running agents count."""

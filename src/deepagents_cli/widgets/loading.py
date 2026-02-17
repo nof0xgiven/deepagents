@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, ClassVar
 from textual.containers import Horizontal
 from textual.widgets import Static
 
+from deepagents_cli import theme
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
@@ -54,6 +56,7 @@ class LoadingWidget(Static):
         height: auto;
         margin-top: 1;
         padding: 0 1;
+        border-left: solid #8cd8ff 35%;
     }
 
     LoadingWidget .loading-container {
@@ -97,10 +100,14 @@ class LoadingWidget(Static):
     def compose(self) -> ComposeResult:
         """Compose the loading widget layout."""
         with Horizontal(classes="loading-container"):
-            self._spinner_widget = Static(self._spinner.current_frame(), classes="loading-spinner")
+            self._spinner_widget = Static(
+                self._spinner.current_frame(), classes="loading-spinner"
+            )
             yield self._spinner_widget
 
-            self._status_widget = Static(f" {self._status}... ", classes="loading-status")
+            self._status_widget = Static(
+                f" {self._status}... ", classes="loading-status"
+            )
             yield self._status_widget
 
             self._hint_widget = Static("(0s, esc to interrupt)", classes="loading-hint")
@@ -118,21 +125,32 @@ class LoadingWidget(Static):
 
         if self._spinner_widget:
             frame = self._spinner.next_frame()
-            self._spinner_widget.update(f"[#8cd8ff]{frame}[/]")
+            self._spinner_widget.update(f"[{theme.ACCENT_DIM}]{frame}[/]")
 
         if self._hint_widget and self._start_time is not None:
             elapsed = int(time() - self._start_time)
-            self._hint_widget.update(f"({elapsed}s, esc to interrupt)")
+            if elapsed > 10:
+                self._hint_widget.update(
+                    f"([{theme.ACCENT_DIM}]{elapsed}s[/{theme.ACCENT_DIM}], esc to interrupt)"
+                )
+            else:
+                self._hint_widget.update(f"({elapsed}s, esc to interrupt)")
 
-    def set_status(self, status: str) -> None:
+    def set_status(self, status: str, context: str = "") -> None:
         """Update the status text.
 
         Args:
             status: New status text
+            context: Optional action context (e.g., "editing src/app.py")
         """
         self._status = status
         if self._status_widget:
-            self._status_widget.update(f" {self._status}... ")
+            if context:
+                self._status_widget.update(
+                    f" {self._status} [{theme.HINT}]\u00b7 {context}[/{theme.HINT}]... "
+                )
+            else:
+                self._status_widget.update(f" {self._status}... ")
 
     def pause(self, status: str = "Awaiting decision") -> None:
         """Pause the animation and update status.
@@ -149,7 +167,7 @@ class LoadingWidget(Static):
         if self._hint_widget:
             self._hint_widget.update(f"(paused at {self._paused_elapsed}s)")
         if self._spinner_widget:
-            self._spinner_widget.update("[#9fb0c0]||[/#9fb0c0]")
+            self._spinner_widget.update(f"[{theme.MUTED}]||[/{theme.MUTED}]")
 
     def resume(self) -> None:
         """Resume the animation."""

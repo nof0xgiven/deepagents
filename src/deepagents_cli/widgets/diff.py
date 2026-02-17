@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from textual.containers import Vertical
 from textual.widgets import Static
 
+from deepagents_cli import theme
+
 if TYPE_CHECKING:
     from textual.app import ComposeResult
 
@@ -41,8 +43,12 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
     lines = diff.splitlines()
 
     # Compute stats first
-    additions = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
-    deletions = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
+    additions = sum(
+        1 for ln in lines if ln.startswith("+") and not ln.startswith("+++")
+    )
+    deletions = sum(
+        1 for ln in lines if ln.startswith("-") and not ln.startswith("---")
+    )
 
     # Find max line number for width calculation
     max_line = 0
@@ -56,9 +62,9 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
     # Add stats header
     stats_parts = []
     if additions:
-        stats_parts.append(f"[#72d69f]+{additions}[/#72d69f]")
+        stats_parts.append(f"[{theme.SUCCESS}]+{additions}[/{theme.SUCCESS}]")
     if deletions:
-        stats_parts.append(f"[#ff7a7a]-{deletions}[/#ff7a7a]")
+        stats_parts.append(f"[{theme.ERROR}]-{deletions}[/{theme.ERROR}]")
     if stats_parts:
         formatted.append(" ".join(stats_parts))
         formatted.append("")  # Blank line after stats
@@ -86,25 +92,27 @@ def format_diff_textual(diff: str, max_lines: int | None = 100) -> str:
 
         if line.startswith("-"):
             formatted.append(
-                f"[#94a5b6]{old_num:>{width}}[/#94a5b6] "
-                f"[#ff7a7a]-{escaped_content}[/#ff7a7a]"
+                f"[{theme.MUTED}]{old_num:>{width}}[/{theme.MUTED}] "
+                f"[{theme.ERROR}]-{escaped_content}[/{theme.ERROR}]"
             )
             old_num += 1
             line_count += 1
         elif line.startswith("+"):
             formatted.append(
-                f"[#94a5b6]{new_num:>{width}}[/#94a5b6] "
-                f"[#72d69f]+{escaped_content}[/#72d69f]"
+                f"[{theme.MUTED}]{new_num:>{width}}[/{theme.MUTED}] "
+                f"[{theme.SUCCESS}]+{escaped_content}[/{theme.SUCCESS}]"
             )
             new_num += 1
             line_count += 1
         elif line.startswith(" "):
-            formatted.append(f"[#94a5b6]{old_num:>{width}}[/#94a5b6]  {escaped_content}")
+            formatted.append(
+                f"[{theme.MUTED}]{old_num:>{width}}[/{theme.MUTED}]  {escaped_content}"
+            )
             old_num += 1
             new_num += 1
             line_count += 1
         elif line.strip() == "...":
-            formatted.append("[#94a5b6]...[/#94a5b6]")
+            formatted.append(f"[{theme.MUTED}]...[/{theme.MUTED}]")
             line_count += 1
 
     return "\n".join(formatted)
@@ -174,7 +182,10 @@ class EnhancedDiff(Vertical):
 
     def compose(self) -> ComposeResult:
         """Compose the diff widget layout."""
-        yield Static(f"[#d0dbe7]{self._title}[/#d0dbe7]", classes="diff-title")
+        yield Static(
+            f"[{theme.SECONDARY}]{self._title}[/{theme.SECONDARY}]",
+            classes="diff-title",
+        )
 
         formatted = format_diff_textual(self._diff, self._max_lines)
         yield Static(formatted, classes="diff-content")
@@ -183,7 +194,7 @@ class EnhancedDiff(Vertical):
         if additions or deletions:
             stats_parts = []
             if additions:
-                stats_parts.append(f"[#72d69f]+{additions}[/#72d69f]")
+                stats_parts.append(f"[{theme.SUCCESS}]+{additions}[/{theme.SUCCESS}]")
             if deletions:
-                stats_parts.append(f"[#ff7a7a]-{deletions}[/#ff7a7a]")
+                stats_parts.append(f"[{theme.ERROR}]-{deletions}[/{theme.ERROR}]")
             yield Static(" ".join(stats_parts), classes="diff-stats")

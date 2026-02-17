@@ -1,16 +1,28 @@
 /* DeepAgents CLI - terminal-native refreshed interface */
 
+$primary: #f4f8fc;
+$secondary: #d0dbe7;
+$muted: #9aa8b7;
+$hint: #8898a8;
+$accent: #33bfff;
+$accent-dim: #8cd8ff;
+$success: #72d69f;
+$error: #ff7a7a;
+$warning: #f2c35c;
+$border: #a7b4c2;
+$border-dim: #98a8b8;
+
 Screen {
     layout: vertical;
     layers: base autocomplete modal;
     background: transparent;
-    scrollbar-color: #9aa5b1 38%;
-    scrollbar-color-hover: #b4c0cc 62%;
-    scrollbar-color-active: #d5dde6 82%;
+    scrollbar-color: $accent-dim 38%;
+    scrollbar-color-hover: $accent-dim 62%;
+    scrollbar-color-active: $accent-dim 82%;
     scrollbar-background: transparent;
     scrollbar-background-hover: transparent;
     scrollbar-background-active: transparent;
-    scrollbar-size-vertical: 0;
+    scrollbar-size-vertical: 1;
 }
 
 /* Chat area */
@@ -18,9 +30,9 @@ Screen {
     height: 1fr;
     padding: 1 3 0 3;
     background: transparent;
-    scrollbar-color: #9aa5b1 38%;
+    scrollbar-color: $accent-dim 38%;
     scrollbar-background: transparent;
-    scrollbar-size-vertical: 0;
+    scrollbar-size-vertical: 1;
 }
 
 /* Welcome banner */
@@ -37,7 +49,7 @@ Screen {
 
 /* Inline markdown code chips */
 Markdown MarkdownBlock > .code_inline {
-    background: #f2c35c 18%;
+    background: $warning 18%;
     color: #f4cf7e;
 }
 
@@ -46,7 +58,7 @@ Markdown MarkdownBlock > .code_inline {
     height: auto;
     margin-top: 1;
     padding: 0;
-    border-top: solid #b8c4d0 18%;
+    border-top: solid $border 18%;
     background: transparent;
 }
 
@@ -63,11 +75,11 @@ Markdown MarkdownBlock > .code_inline {
     margin: 1 0;
     padding: 1 2;
     background: transparent;
-    border: solid #9fb0c0 38%;
+    border: solid $muted 55%;
 }
 
 .approval-menu .approval-title {
-    color: #eef4fb;
+    color: $primary;
     margin-bottom: 0;
 }
 
@@ -85,8 +97,8 @@ Markdown MarkdownBlock > .code_inline {
 
 .approval-menu .approval-option-selected {
     background: transparent;
-    color: #f4f8fc;
-    border-left: thick #33bfff;
+    color: $primary;
+    border-left: thick $accent;
 }
 
 .approval-menu .approval-help {
@@ -102,9 +114,9 @@ Markdown MarkdownBlock > .code_inline {
     width: auto;
     margin: 0 0 0 1;
     padding: 0 1;
-    color: #d7e4f0;
+    color: $secondary;
     background: transparent;
-    border-left: solid #33bfff 40%;
+    border-left: solid $accent 40%;
     text-style: dim;
     display: none;
 }
@@ -114,7 +126,7 @@ Markdown MarkdownBlock > .code_inline {
 }
 
 #agents-pill.pulse-on {
-    color: #f4f8fc;
+    color: $primary;
     text-style: none;
 }
 
@@ -132,7 +144,7 @@ Markdown MarkdownBlock > .code_inline {
 }
 
 .approval-file-path {
-    color: #f4f8fc;
+    color: $primary;
 }
 
 .approval-description {
@@ -147,13 +159,13 @@ Markdown MarkdownBlock > .code_inline {
 
 .diff-removed {
     height: auto;
-    color: #ff7a7a;
+    color: $error;
     padding: 0 1;
 }
 
 .diff-added {
     height: auto;
-    color: #72d69f;
+    color: $success;
     padding: 0 1;
 }
 
@@ -212,7 +224,7 @@ Markdown MarkdownBlock > .code_inline {
 }
 
 #slash-command-menu .slash-command-row.selected {
-    color: #f4f8fc;
+    color: $primary;
     background: transparent;
     text-style: bold;
 }
@@ -226,8 +238,8 @@ Markdown MarkdownBlock > .code_inline {
     margin-right: 2;
     margin-bottom: 1;
     background: transparent;
-    color: #eef4fb;
-    border: solid #aab6c3 45%;
+    color: $primary;
+    border: solid $border 45%;
     padding: 1 2;
     layer: autocomplete;
 }
@@ -240,15 +252,15 @@ Toast {
 }
 
 Toast.-information {
-    border-left: outer #33bfff;
+    border-left: outer $accent;
 }
 
 Toast.-information .toast--title {
-    color: #8cd8ff;
+    color: $accent-dim;
 }
 
 Toast.-warning {
-    border-left: outer #f2c35c;
+    border-left: outer $warning;
 }
 
 Toast.-warning .toast--title {
@@ -280,7 +292,7 @@ ModelSelectorScreen {
 }
 
 #model-selector-title {
-    color: #f4f8fc;
+    color: $primary;
     margin-bottom: 1;
     text-align: center;
     text-style: bold;
@@ -290,14 +302,14 @@ ModelSelectorScreen {
     dock: top;
     margin-bottom: 1;
     background: transparent;
-    border: solid #98a6b5 52%;
-    color: #f4f8fc;
+    border: solid $border-dim 52%;
+    color: $primary;
     height: 3;
     padding: 0 1;
 }
 
 .model-selector-input:focus {
-    border: solid #33bfff;
+    border: solid $accent;
 }
 
 #model-selector-list {
@@ -315,7 +327,7 @@ ModelSelectorScreen {
 
 #model-selector-list > .option-list--option-highlighted {
     background: transparent;
-    color: #f4f8fc;
+    color: $primary;
     text-style: bold;
 }
 

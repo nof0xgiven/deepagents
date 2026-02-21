@@ -61,6 +61,9 @@ class CompletionPopup(Static):
         display: none;
         dock: top;
         layer: autocomplete;
+        background: #0f161d 88%;
+        color: #f4f8fc;
+        border: solid #a7b4c2 45%;
     }
     """
 

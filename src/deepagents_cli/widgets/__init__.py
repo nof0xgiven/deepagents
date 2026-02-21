@@ -12,6 +12,7 @@ from deepagents_cli.widgets.messages import (
     UserMessage,
 )
 from deepagents_cli.widgets.status import StatusBar
+from deepagents_cli.widgets.subagent_panel import SubagentPanel
 from deepagents_cli.widgets.welcome import WelcomeBanner
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "DiffMessage",
     "ErrorMessage",
     "StatusBar",
+    "SubagentPanel",
     "SystemMessage",
     "ToolCallMessage",
     "UserMessage",

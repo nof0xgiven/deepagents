@@ -37,6 +37,7 @@ from deepagents_cli.widgets.messages import (
 )
 from deepagents_cli.widgets.agents_pill import AgentsPill
 from deepagents_cli.widgets.status import StatusBar
+from deepagents_cli.widgets.subagent_panel import SubagentPanel
 from deepagents_cli.widgets.welcome import WelcomeBanner
 
 if TYPE_CHECKING:
@@ -191,6 +192,7 @@ class DeepAgentsApp(App):
         self._agents_pill: AgentsPill | None = None
         self._background_agent_tasks: set[str] = set()
         self._stream_agent_namespaces: set[tuple] = set()
+        self._subagent_panels: dict[tuple, SubagentPanel] = {}
         self._token_tracker: TextualTokenTracker | None = None
         self._model_controller = ModelController(project_root=settings.project_root)
         self._command_registry = build_default_registry()
@@ -243,6 +245,9 @@ class DeepAgentsApp(App):
                 hide_thinking=self._hide_thinking,
                 on_subagent_start=self._on_subagent_stream_start,
                 on_subagent_end=self._on_subagent_stream_end,
+                on_subagent_text=self._on_subagent_stream_text,
+                on_subagent_tool_call=self._on_subagent_stream_tool_call,
+                on_subagent_update=self._on_subagent_stream_update,
             )
             self._ui_adapter.set_token_tracker(self._token_tracker)
         else:
@@ -342,19 +347,25 @@ class DeepAgentsApp(App):
 
     def _on_subagent_stream_start(self, namespace: tuple) -> None:
         """Handle subagent stream start from adapter namespace events."""
+        self._stream_agent_namespaces.add(namespace)
 
         def _do() -> None:
-            self._stream_agent_namespaces.add(namespace)
             self._refresh_agents_pill()
+            self.call_after_refresh(
+                lambda: asyncio.create_task(self._ensure_subagent_panel(namespace))
+            )
 
         self.call_later(_do)
 
     def _on_subagent_stream_end(self, namespace: tuple) -> None:
         """Handle subagent stream completion from adapter namespace events."""
+        self._stream_agent_namespaces.discard(namespace)
 
         def _do() -> None:
-            self._stream_agent_namespaces.discard(namespace)
             self._refresh_agents_pill()
+            panel = self._subagent_panels.pop(namespace, None)
+            if panel is not None:
+                self.call_after_refresh(lambda: asyncio.create_task(self._finalize_panel(panel)))
 
         self.call_later(_do)
 
@@ -375,7 +386,68 @@ class DeepAgentsApp(App):
             self._task_manager.cleanup()
         self._background_agent_tasks.clear()
         self._stream_agent_namespaces.clear()
+        if self._subagent_panels:
+            self.call_after_refresh(lambda: asyncio.create_task(self._clear_subagent_panels()))
         self._refresh_agents_pill()
+
+    async def _ensure_subagent_panel(self, namespace: tuple) -> SubagentPanel | None:
+        """Create or return an existing panel for a subagent namespace."""
+        if namespace == ():
+            return None
+        if namespace not in self._stream_agent_namespaces and namespace not in self._subagent_panels:
+            return None
+        existing = self._subagent_panels.get(namespace)
+        if existing is not None and existing.is_attached:
+            return existing
+        panel = SubagentPanel(namespace=namespace)
+        self._subagent_panels[namespace] = panel
+        try:
+            messages = self.query_one("#messages", Container)
+            await messages.mount(panel)
+            self._scroll_chat_to_bottom()
+        except NoMatches:
+            return None
+        return panel
+
+    async def _finalize_panel(self, panel: SubagentPanel) -> None:
+        """Finalize and remove a subagent panel."""
+        await panel.complete()
+        if panel.is_attached:
+            await panel.remove()
+
+    async def _clear_subagent_panels(self) -> None:
+        """Remove all subagent panels from the transcript."""
+        panels = list(self._subagent_panels.values())
+        self._subagent_panels.clear()
+        for panel in panels:
+            if panel.is_attached:
+                await panel.remove()
+
+    async def _on_subagent_stream_text(self, namespace: tuple, text: str) -> None:
+        """Append streamed subagent text to its panel."""
+        panel = await self._ensure_subagent_panel(namespace)
+        if panel is None:
+            return
+        await panel.append_text(text)
+        self._scroll_chat_to_bottom()
+
+    async def _on_subagent_stream_tool_call(
+        self, namespace: tuple, tool_name: str, args: dict[str, Any]
+    ) -> None:
+        """Append compact subagent tool-call events."""
+        panel = await self._ensure_subagent_panel(namespace)
+        if panel is None:
+            return
+        panel.append_tool_call(tool_name, args)
+        self._scroll_chat_to_bottom()
+
+    async def _on_subagent_stream_update(self, namespace: tuple, status_line: str) -> None:
+        """Append compact update events for a subagent panel."""
+        panel = await self._ensure_subagent_panel(namespace)
+        if panel is None:
+            return
+        panel.append_event(status_line)
+        self._scroll_chat_to_bottom()
 
     async def _request_approval(
         self,
@@ -607,6 +679,9 @@ class DeepAgentsApp(App):
                 hide_thinking=self._hide_thinking,
                 on_subagent_start=self._on_subagent_stream_start,
                 on_subagent_end=self._on_subagent_stream_end,
+                on_subagent_text=self._on_subagent_stream_text,
+                on_subagent_tool_call=self._on_subagent_stream_tool_call,
+                on_subagent_update=self._on_subagent_stream_update,
             )
             self._ui_adapter.set_token_tracker(self._token_tracker)
         if self._token_tracker:

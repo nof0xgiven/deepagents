@@ -95,9 +95,10 @@ def _list(agent: str, *, project: bool = False) -> None:
     Args:
         agent: Agent identifier for skills (default: agent).
         project: If True, show only project skills.
-            If False, show all skills (user + project).
+            If False, show all skills (default + user + project).
     """
     settings = Settings.from_environment()
+    default_skills_dir = settings.get_default_skills_dir()
     user_skills_dir = settings.get_user_skills_dir(agent)
     project_skills_dir = settings.get_project_skills_dir()
 
@@ -123,16 +124,24 @@ def _list(agent: str, *, project: bool = False) -> None:
             )
             return
 
-        skills = list_skills(user_skills_dir=None, project_skills_dir=project_skills_dir)
+        skills = list_skills(
+            default_skills_dir=None,
+            user_skills_dir=None,
+            project_skills_dir=project_skills_dir,
+        )
         console.print("\n[bold]Project Skills:[/bold]\n", style=COLORS["primary"])
     else:
-        # Load both user and project skills
-        skills = list_skills(user_skills_dir=user_skills_dir, project_skills_dir=project_skills_dir)
+        # Load default, user, and project skills
+        skills = list_skills(
+            default_skills_dir=default_skills_dir,
+            user_skills_dir=user_skills_dir,
+            project_skills_dir=project_skills_dir,
+        )
 
         if not skills:
             console.print("[yellow]No skills found.[/yellow]")
             console.print(
-                "[dim]Skills will be created in ~/.deepagents/agent/skills/ when you add them.[/dim]",
+                "[dim]Skills can be loaded from ~/.agents/skills/ and will be created in ~/.deepagents/agent/skills/ when you add them.[/dim]",
                 style=COLORS["dim"],
             )
             console.print(
@@ -144,11 +153,24 @@ def _list(agent: str, *, project: bool = False) -> None:
         console.print("\n[bold]Available Skills:[/bold]\n", style=COLORS["primary"])
 
     # Group skills by source
+    default_skills = [s for s in skills if s["source"] == "default"]
     user_skills = [s for s in skills if s["source"] == "user"]
     project_skills_list = [s for s in skills if s["source"] == "project"]
 
+    # Show default skills
+    if default_skills and not project:
+        console.print("[bold magenta]Default Skills:[/bold magenta]", style=COLORS["primary"])
+        for skill in default_skills:
+            skill_path = Path(skill["path"])
+            console.print(f"  • [bold]{skill['name']}[/bold]", style=COLORS["primary"])
+            console.print(f"    {skill['description']}", style=COLORS["dim"])
+            console.print(f"    Location: {skill_path.parent}/", style=COLORS["dim"])
+            console.print()
+
     # Show user skills
     if user_skills and not project:
+        if default_skills:
+            console.print()
         console.print("[bold cyan]User Skills:[/bold cyan]", style=COLORS["primary"])
         for skill in user_skills:
             skill_path = Path(skill["path"])
@@ -159,7 +181,7 @@ def _list(agent: str, *, project: bool = False) -> None:
 
     # Show project skills
     if project_skills_list:
-        if not project and user_skills:
+        if not project and (default_skills or user_skills):
             console.print()
         console.print("[bold #00AEEF]Project Skills:[/bold #00AEEF]", style=COLORS["primary"])
         for skill in project_skills_list:
@@ -325,9 +347,11 @@ def _info(skill_name: str, *, agent: str = "agent", project: bool = False) -> No
     Args:
         skill_name: Name of the skill to show info for.
         agent: Agent identifier for skills (default: agent).
-        project: If True, only search in project skills. If False, search in both user and project skills.
+        project: If True, only search in project skills.
+            If False, search in default, user, and project skills.
     """
     settings = Settings.from_environment()
+    default_skills_dir = settings.get_default_skills_dir()
     user_skills_dir = settings.get_user_skills_dir(agent)
     project_skills_dir = settings.get_project_skills_dir()
 
@@ -336,9 +360,17 @@ def _info(skill_name: str, *, agent: str = "agent", project: bool = False) -> No
         if not project_skills_dir:
             console.print("[bold red]Error:[/bold red] Not in a project directory.")
             return
-        skills = list_skills(user_skills_dir=None, project_skills_dir=project_skills_dir)
+        skills = list_skills(
+            default_skills_dir=None,
+            user_skills_dir=None,
+            project_skills_dir=project_skills_dir,
+        )
     else:
-        skills = list_skills(user_skills_dir=user_skills_dir, project_skills_dir=project_skills_dir)
+        skills = list_skills(
+            default_skills_dir=default_skills_dir,
+            user_skills_dir=user_skills_dir,
+            project_skills_dir=project_skills_dir,
+        )
 
     # Find the skill
     skill = next((s for s in skills if s["name"] == skill_name), None)
@@ -355,8 +387,16 @@ def _info(skill_name: str, *, agent: str = "agent", project: bool = False) -> No
     skill_content = skill_path.read_text()
 
     # Determine source label
-    source_label = "Project Skill" if skill["source"] == "project" else "User Skill"
-    source_color = "#00AEEF" if skill["source"] == "project" else "cyan"
+    source = skill["source"]
+    if source == "project":
+        source_label = "Project Skill"
+        source_color = "#00AEEF"
+    elif source == "user":
+        source_label = "User Skill"
+        source_color = "cyan"
+    else:
+        source_label = "Default Skill"
+        source_color = "magenta"
 
     console.print(
         f"\n[bold]Skill: {skill['name']}[/bold] [bold {source_color}]({source_label})[/bold {source_color}]\n",

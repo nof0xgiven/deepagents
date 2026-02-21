@@ -365,6 +365,7 @@ def _build_subagent_skills_cache(
 
     project_skills_dir = settings.get_project_skills_dir()
     user_skills_dir = settings.get_user_skills_dir(assistant_id)
+    default_skills_dir = settings.get_default_skills_dir()
 
     linked = 0
     for skill_name in skills:
@@ -375,6 +376,10 @@ def _build_subagent_skills_cache(
                 src = candidate
         if src is None:
             candidate = user_skills_dir / skill_name
+            if candidate.is_dir():
+                src = candidate
+        if src is None:
+            candidate = default_skills_dir / skill_name
             if candidate.is_dir():
                 src = candidate
 
@@ -398,6 +403,54 @@ def _build_subagent_skills_cache(
         linked += 1
 
     return cache_dir if linked else None
+
+
+def _prepare_skills_source(
+    *,
+    source_dir: Path,
+    source_name: str,
+    cache_root: Path,
+) -> Path:
+    """Return a safe skills source path, filtering unreadable skill directories."""
+    if not source_dir.exists():
+        return source_dir
+
+    readable_dirs: list[Path] = []
+    unreadable_count = 0
+
+    for child in source_dir.iterdir():
+        if not child.is_dir():
+            continue
+        skill_md = child / "SKILL.md"
+        if not skill_md.exists() and not skill_md.is_symlink():
+            continue
+        try:
+            skill_md.read_bytes()
+        except Exception:
+            unreadable_count += 1
+            continue
+        readable_dirs.append(child)
+
+    if unreadable_count == 0:
+        return source_dir
+
+    cache_dir = cache_root / source_name
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    for child in readable_dirs:
+        dest = cache_dir / child.name
+        try:
+            dest.symlink_to(child, target_is_directory=True)
+        except Exception:
+            shutil.copytree(child, dest, dirs_exist_ok=True)
+
+    console.print(
+        "[yellow]⚠️ Some skills in "
+        f"{source_dir} were unreadable and have been skipped ({unreadable_count}).[/yellow]"
+    )
+    return cache_dir
 
 
 def _resolve_subagent_skills_sources(
@@ -534,6 +587,28 @@ def reset_agent(agent_name: str, source_agent: str | None = None) -> None:
     console.print(f"Location: {agent_dir}\n", style=COLORS["dim"])
 
 
+def get_coding_instructions(assistant_id: str) -> str:
+    """Load coding instructions from SYSTEM.md with priority resolution.
+
+    Priority: User SYSTEM.md > Project SYSTEM.md > default_agent_prompt.md
+    """
+    # 1. User-level
+    user_path = settings.get_user_system_md_path(assistant_id)
+    if user_path:
+        return user_path.read_text()
+
+    # 2. Project-level
+    project_root = settings.project_root
+    if project_root:
+        for name in ("SYSTEM.md", "system.md"):
+            candidate = project_root / ".deepagents" / name
+            if candidate.exists():
+                return candidate.read_text()
+
+    # 3. Default
+    return (Path(__file__).parent / "default_agent_prompt.md").read_text()
+
+
 def get_system_prompt(assistant_id: str, sandbox_type: str | None = None) -> str:
     """Get the base system prompt for the agent.
 
@@ -546,6 +621,7 @@ def get_system_prompt(assistant_id: str, sandbox_type: str | None = None) -> str
         The system prompt string (without AGENTS.md content)
     """
     agent_dir_path = f"~/.deepagents/{assistant_id}"
+    default_skills_dir = "~/.agents/skills"
 
     if sandbox_type:
         # Get provider-specific working directory
@@ -589,10 +665,16 @@ Example: `/memories/project_notes.md`
     return (
         working_dir_section
         + memory_store_section
-        + f"""### Skills Directory
+        + f"""### Skills Directories
 
-Your skills are stored at: `{agent_dir_path}/skills/`
+Skills can be loaded from these locations:
+- Default skills: `{default_skills_dir}/`
+- Agent skills: `{agent_dir_path}/skills/`
+- Project skills: `<project>/.deepagents/skills/` (when in a project)
+
+When the same skill name exists in multiple locations, project overrides agent, and agent overrides default.
 Skills may contain scripts or supporting files. When executing skill scripts with bash, use the real filesystem path:
+Example: `bash python {default_skills_dir}/web-research/script.py`
 Example: `bash python {agent_dir_path}/skills/web-research/script.py`
 
 ### Human-in-the-Loop Tool Approval
@@ -631,6 +713,8 @@ When using the write_todos tool:
 6. Update todo status promptly as you complete each item
 
 The todo list is a planning tool - use it judiciously to avoid overwhelming the user with excessive task tracking."""
+        + "\n\n"
+        + get_coding_instructions(assistant_id)
     )
 
 
@@ -874,15 +958,23 @@ def create_cli_agent(
         agent_dir = settings.ensure_agent_dir(assistant_id)
         agent_md = agent_dir / "AGENTS.md"
         if not agent_md.exists():
-            source_content = get_default_coding_instructions()
-            agent_md.write_text(source_content)
+            user_system_md = settings.get_user_system_md_path(assistant_id)
+            if user_system_md:
+                # SYSTEM.md provides coding instructions; AGENTS.md is just agent memory
+                agent_md.write_text("# Agent Memory\n\nThis file stores learned preferences and context.\n")
+            else:
+                # No SYSTEM.md — seed AGENTS.md with default coding instructions (legacy behavior)
+                source_content = get_default_coding_instructions()
+                agent_md.write_text(source_content)
 
     # Skills directories (if enabled)
     skills_dir = None
     project_skills_dir = None
+    default_skills_dir = None
     if enable_skills:
         skills_dir = settings.ensure_user_skills_dir(assistant_id)
         project_skills_dir = settings.get_project_skills_dir()
+        default_skills_dir = settings.get_default_skills_dir()
 
     # Build middleware stack based on enabled features
     agent_middleware = []
@@ -903,9 +995,27 @@ def create_cli_agent(
 
     # Add skills middleware
     if enable_skills:
-        sources = [str(skills_dir)]
+        # SkillsMiddleware uses last-source-wins precedence.
+        # Order sources as default -> user -> project to enforce
+        # project > user > default priority.
+        source_cache_root = settings.get_agent_dir(assistant_id) / ".skills_source_cache"
+        source_candidates = [
+            ("default", default_skills_dir),
+            ("user", skills_dir),
+        ]
         if project_skills_dir:
-            sources.append(str(project_skills_dir))
+            source_candidates.append(("project", project_skills_dir))
+
+        sources = []
+        for source_name, source_dir in source_candidates:
+            if source_dir is None:
+                continue
+            safe_source = _prepare_skills_source(
+                source_dir=source_dir,
+                source_name=source_name,
+                cache_root=source_cache_root,
+            )
+            sources.append(str(safe_source))
 
         agent_middleware.append(
             SkillsMiddleware(

@@ -102,6 +102,8 @@ Each extension exports a `register(api)` entrypoint and may call:
 If `skills` is omitted, the CLI attempts to resolve it from:
 `<project>/.deepagents/subagents/<name>/AGENTS.md` or
 `~/.deepagents/<agent>/subagents/<name>/AGENTS.md` using YAML frontmatter.
+Skill names in frontmatter resolve with precedence:
+`<project>/.deepagents/skills` > `~/.deepagents/<agent>/skills` > `~/.agents/skills`.
 
 ## Events
 

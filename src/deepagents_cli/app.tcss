@@ -47,6 +47,16 @@ Screen {
     height: auto;
 }
 
+/* Subagent live panels */
+SubagentPanel {
+    max-height: 16;
+}
+
+SubagentPanel Markdown {
+    margin-top: 1;
+    padding: 0;
+}
+
 /* Inline markdown code chips */
 Markdown MarkdownBlock > .code_inline {
     background: $warning 18%;
@@ -237,7 +247,7 @@ Markdown MarkdownBlock > .code_inline {
     margin-left: 5;
     margin-right: 2;
     margin-bottom: 1;
-    background: transparent;
+    background: #0f161d 88%;
     color: $primary;
     border: solid $border 45%;
     padding: 1 2;

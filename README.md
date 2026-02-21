@@ -212,16 +212,21 @@ See `docs/extensions.md` for the full extension API.
 ## Memory and skills
 
 ```
+~/.agents/skills/
+  <skill>/SKILL.md             # Shared default skills
+
 ~/.deepagents/<agent>/
   AGENTS.md                     # Agent memory and context
   subagents/<name>.md           # Subagent system prompts
-  skills/<skill>/SKILL.md       # Reusable skill definitions
+  skills/<skill>/SKILL.md       # Agent-scoped skills (override default)
 
 <project>/.deepagents/
   AGENTS.md                     # Project-scoped context
   subagents/<name>.md
-  skills/<skill>/SKILL.md
+  skills/<skill>/SKILL.md       # Project-scoped skills (highest priority)
 ```
+
+Skill precedence when names conflict: `<project>/.deepagents/skills` > `~/.deepagents/<agent>/skills` > `~/.agents/skills`.
 
 ## Alpha status
 

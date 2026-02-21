@@ -303,6 +303,6 @@ Your job is to build something that remains correct, understandable, and valuabl
 
 <deepagents_cli_additions>
 - Long-term memory: store durable notes under `/memories/` (persisted across threads). Keep entries concise and date-stamped.
-- Skills: available in `~/.deepagents/<agent>/skills/` and `<project>/.deepagents/skills/`. If a task matches a skill, read its `SKILL.md` and follow it; mention which skill you used.
+- Skills: available in `~/.agents/skills/`, `~/.deepagents/<agent>/skills/`, and `<project>/.deepagents/skills/` with precedence `project > agent > default`. If a task matches a skill, read its `SKILL.md` and follow it; mention which skill you used.
 - Subagent skills: when acting as a subagent, only use the skills listed in that subagent’s `AGENTS.md` frontmatter.
 </deepagents_cli_additions>

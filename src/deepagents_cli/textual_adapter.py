@@ -67,6 +67,9 @@ class TextualUIAdapter:
         hide_thinking: Callable[[], None] | None = None,
         on_subagent_start: Callable[[tuple], None] | None = None,
         on_subagent_end: Callable[[tuple], None] | None = None,
+        on_subagent_text: Callable[[tuple, str], None] | None = None,
+        on_subagent_tool_call: Callable[[tuple, str, dict[str, Any]], None] | None = None,
+        on_subagent_update: Callable[[tuple, str], None] | None = None,
     ) -> None:
         """Initialize the adapter.
 
@@ -80,6 +83,9 @@ class TextualUIAdapter:
             hide_thinking: Callback to hide thinking spinner
             on_subagent_start: Callback fired when a subagent stream namespace starts
             on_subagent_end: Callback fired when a subagent stream namespace ends
+            on_subagent_text: Callback fired when subagent text is streamed
+            on_subagent_tool_call: Callback fired when subagent tool calls are emitted
+            on_subagent_update: Callback fired for subagent status/update events
         """
         self._mount_message = mount_message
         self._update_status = update_status
@@ -90,6 +96,9 @@ class TextualUIAdapter:
         self._hide_thinking = hide_thinking
         self._on_subagent_start = on_subagent_start
         self._on_subagent_end = on_subagent_end
+        self._on_subagent_text = on_subagent_text
+        self._on_subagent_tool_call = on_subagent_tool_call
+        self._on_subagent_update = on_subagent_update
 
         # State tracking
         self._current_assistant_message: AssistantMessage | None = None
@@ -226,10 +235,10 @@ async def execute_task_textual(
 
     file_op_tracker = FileOpTracker(assistant_id=assistant_id, backend=backend)
     displayed_tool_ids: set[str] = set()
-    tool_call_buffers: dict[str | int, dict] = {}
+    tool_call_buffers: dict[tuple[tuple, str | int], dict] = {}
 
-    # Track pending text and assistant messages PER NAMESPACE to avoid interleaving
-    # when multiple subagents stream in parallel
+    # Track main-assistant pending text/message state.
+    # Subagent streams are routed via dedicated callbacks.
     pending_text_by_namespace: dict[tuple, str] = {}
     assistant_message_by_namespace: dict[tuple, Any] = {}
     active_subagent_namespaces: set[tuple] = set()
@@ -253,6 +262,38 @@ async def execute_task_textual(
         if callback is None:
             return
         result = callback(ns_key)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _emit_subagent_text(ns_key: tuple, text: str) -> None:
+        if ns_key == () or not text:
+            return
+        callback = adapter._on_subagent_text
+        if callback is None:
+            return
+        result = callback(ns_key, text)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _emit_subagent_tool_call(
+        ns_key: tuple, tool_name: str, args: dict[str, Any]
+    ) -> None:
+        if ns_key == () or not tool_name:
+            return
+        callback = adapter._on_subagent_tool_call
+        if callback is None:
+            return
+        result = callback(ns_key, tool_name, args)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _emit_subagent_update(ns_key: tuple, status_line: str) -> None:
+        if ns_key == () or not status_line:
+            return
+        callback = adapter._on_subagent_update
+        if callback is None:
+            return
+        result = callback(ns_key, status_line)
         if asyncio.iscoroutine(result):
             await result
 
@@ -285,8 +326,7 @@ async def execute_task_textual(
                 ns_key = tuple(namespace) if namespace else ()
                 await _emit_subagent_start(ns_key)
 
-                # Filter out subagent outputs - only show main agent (empty namespace)
-                # Subagents run via Task tool and should only report back to the main agent
+                # Main agent uses empty namespace tuple.
                 is_main_agent = ns_key == ()
 
                 # Handle UPDATES stream - for interrupts and todos
@@ -308,19 +348,117 @@ async def execute_task_textual(
                                 except ValidationError:
                                     raise
 
-                    # Check for todo updates (not yet implemented in Textual UI)
+                    # Check for todo updates
                     chunk_data = next(iter(data.values())) if data else None
                     if chunk_data and isinstance(chunk_data, dict) and "todos" in chunk_data:
-                        pass  # Future: render todo list widget
+                        todos = chunk_data.get("todos", [])
+                        if not is_main_agent:
+                            await _emit_subagent_update(
+                                ns_key, f"todo update: {len(todos)} item(s)"
+                            )
+
+                    if not is_main_agent and "__interrupt__" in data:
+                        await _emit_subagent_update(ns_key, "awaiting approval")
 
                 # Handle MESSAGES stream - for content and tool calls
                 elif current_stream_mode == "messages":
-                    # Skip subagent outputs - only render main agent content in chat
                     if not is_main_agent:
-                        if isinstance(data, tuple) and len(data) == 2:
-                            subagent_message, _ = data
+                        if not isinstance(data, tuple) or len(data) != 2:
+                            continue
+                        subagent_message, subagent_metadata = data
+
+                        if _is_summarization_chunk(subagent_metadata):
+                            continue
+
+                        if isinstance(subagent_message, ToolMessage):
+                            tool_name = getattr(subagent_message, "name", "tool")
+                            tool_status = getattr(subagent_message, "status", "success")
+                            tool_content = format_tool_message_content(subagent_message.content)
+                            summary = f"tool result: {tool_name} ({tool_status})"
+                            content_str = str(tool_content).strip() if tool_content else ""
+                            if content_str:
+                                first_line = content_str.splitlines()[0]
+                                summary = f"{summary} · {first_line[:160]}"
+                            await _emit_subagent_update(ns_key, summary)
                             if getattr(subagent_message, "chunk_position", None) == "last":
                                 await _emit_subagent_end(ns_key)
+                            continue
+
+                        if not hasattr(subagent_message, "content_blocks"):
+                            if getattr(subagent_message, "chunk_position", None) == "last":
+                                await _emit_subagent_end(ns_key)
+                            continue
+
+                        for block in subagent_message.content_blocks:
+                            block_type = block.get("type")
+                            if block_type == "text":
+                                text = block.get("text", "")
+                                if text:
+                                    await _emit_subagent_text(ns_key, text)
+                                continue
+
+                            if block_type not in ("tool_call_chunk", "tool_call"):
+                                continue
+
+                            chunk_name = block.get("name")
+                            chunk_args = block.get("args")
+                            chunk_id = block.get("id")
+                            chunk_index = block.get("index")
+
+                            inner_key: str | int
+                            if chunk_index is not None:
+                                inner_key = chunk_index
+                            elif chunk_id is not None:
+                                inner_key = chunk_id
+                            else:
+                                inner_key = f"unknown-{len(tool_call_buffers)}"
+                            buffer_key = (ns_key, inner_key)
+
+                            buffer = tool_call_buffers.setdefault(
+                                buffer_key,
+                                {"name": None, "id": None, "args": None, "args_parts": []},
+                            )
+
+                            if chunk_name:
+                                buffer["name"] = chunk_name
+                            if chunk_id:
+                                buffer["id"] = chunk_id
+
+                            if isinstance(chunk_args, dict):
+                                buffer["args"] = chunk_args
+                                buffer["args_parts"] = []
+                            elif isinstance(chunk_args, str):
+                                if chunk_args:
+                                    parts: list[str] = buffer.setdefault("args_parts", [])
+                                    if not parts or chunk_args != parts[-1]:
+                                        parts.append(chunk_args)
+                                    buffer["args"] = "".join(parts)
+                            elif chunk_args is not None:
+                                buffer["args"] = chunk_args
+
+                            buffer_name = buffer.get("name")
+                            if buffer_name is None:
+                                continue
+
+                            parsed_args = buffer.get("args")
+                            if isinstance(parsed_args, str):
+                                if not parsed_args:
+                                    continue
+                                try:
+                                    parsed_args = json.loads(parsed_args)
+                                except json.JSONDecodeError:
+                                    continue
+                            elif parsed_args is None:
+                                continue
+
+                            if not isinstance(parsed_args, dict):
+                                parsed_args = {"value": parsed_args}
+
+                            await _emit_subagent_tool_call(ns_key, buffer_name, parsed_args)
+                            tool_call_buffers.pop(buffer_key, None)
+
+                        if getattr(subagent_message, "chunk_position", None) == "last":
+                            await _emit_subagent_end(ns_key)
                         continue
 
                     if not isinstance(data, tuple) or len(data) != 2:
@@ -435,13 +573,14 @@ async def execute_task_textual(
                             chunk_id = block.get("id")
                             chunk_index = block.get("index")
 
-                            buffer_key: str | int
+                            inner_key: str | int
                             if chunk_index is not None:
-                                buffer_key = chunk_index
+                                inner_key = chunk_index
                             elif chunk_id is not None:
-                                buffer_key = chunk_id
+                                inner_key = chunk_id
                             else:
-                                buffer_key = f"unknown-{len(tool_call_buffers)}"
+                                inner_key = f"unknown-{len(tool_call_buffers)}"
+                            buffer_key = (ns_key, inner_key)
 
                             buffer = tool_call_buffers.setdefault(
                                 buffer_key,

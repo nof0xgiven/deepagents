@@ -6,6 +6,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import dotenv
 from rich.console import Console
@@ -32,7 +33,7 @@ if _deepagents_project:
     os.environ["LANGSMITH_PROJECT"] = _deepagents_project
 
 # Now safe to import LangChain modules
-from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models import BaseChatModel  # noqa: E402
 
 # Color scheme
 COLORS = {
@@ -242,6 +243,15 @@ class Settings:
         """
         return Path.home() / ".deepagents"
 
+    @property
+    def user_agents_dir(self) -> Path:
+        """Get the base user-level .agents directory.
+
+        Returns:
+            Path to ~/.agents
+        """
+        return Path.home() / ".agents"
+
     def get_user_agent_md_path(self, agent_name: str) -> Path:
         """Get user-level AGENTS.md path for a specific agent.
 
@@ -254,6 +264,23 @@ class Settings:
             Path to ~/.deepagents/{agent_name}/AGENTS.md
         """
         return Path.home() / ".deepagents" / agent_name / "AGENTS.md"
+
+    def get_user_system_md_path(self, assistant_id: str) -> Path | None:
+        """Return user-level SYSTEM.md path if it exists.
+
+        Args:
+            assistant_id: The agent identifier
+
+        Returns:
+            Path to ~/.deepagents/{assistant_id}/SYSTEM.md if it exists, None otherwise.
+        """
+        path = self.user_deepagents_dir / assistant_id / "SYSTEM.md"
+        if path.exists():
+            return path
+        path_lower = self.user_deepagents_dir / assistant_id / "system.md"
+        if path_lower.exists():
+            return path_lower
+        return None
 
     def get_project_agent_md_path(self) -> Path | None:
         """Get project-level AGENTS.md path.
@@ -347,6 +374,14 @@ class Settings:
         skills_dir = self.get_user_skills_dir(agent_name)
         skills_dir.mkdir(parents=True, exist_ok=True)
         return skills_dir
+
+    def get_default_skills_dir(self) -> Path:
+        """Get shared default skills directory path.
+
+        Returns:
+            Path to ~/.agents/skills/
+        """
+        return self.user_agents_dir / "skills"
 
     def get_project_skills_dir(self) -> Path | None:
         """Get project-level skills directory path.

@@ -5,6 +5,7 @@ from deepagents_cli.app import DeepAgentsApp
 from deepagents_cli.background_tasks import BackgroundTaskManager
 from deepagents_cli.textual_adapter import TextualUIAdapter, execute_task_textual
 from deepagents_cli.widgets.agents_pill import AgentsPill
+from deepagents_cli.widgets.subagent_panel import SubagentPanel
 from langchain_core.messages import ToolMessage
 
 
@@ -224,6 +225,23 @@ async def test_execute_task_emits_subagent_namespace_events():
     class _SubagentChunk:
         def __init__(self, chunk_position: str) -> None:
             self.chunk_position = chunk_position
+            self.content_blocks = []
+            self.usage_metadata = {}
+
+    class _SubagentContentChunk:
+        def __init__(self, chunk_position: str, text: str, include_tool: bool = False) -> None:
+            self.chunk_position = chunk_position
+            self.usage_metadata = {}
+            self.content_blocks = [{"type": "text", "text": text}]
+            if include_tool:
+                self.content_blocks.append(
+                    {
+                        "type": "tool_call",
+                        "name": "read_file",
+                        "args": {"file_path": "/tmp/demo.txt"},
+                        "id": "subagent-tool-1",
+                    }
+                )
 
     class _MainChunk:
         def __init__(self) -> None:
@@ -233,8 +251,9 @@ async def test_execute_task_emits_subagent_namespace_events():
 
     class _FakeAgent:
         async def astream(self, *_args, **_kwargs):
-            yield (("worker",), "messages", (_SubagentChunk("middle"), {}))
-            yield (("worker",), "messages", (_SubagentChunk("last"), {}))
+            yield (("worker",), "updates", {"worker": {"todos": [{"id": "1"}, {"id": "2"}]}})
+            yield (("worker",), "messages", (_SubagentContentChunk("middle", "working", True), {}))
+            yield (("worker",), "messages", (_SubagentContentChunk("last", " done"), {}))
             yield ((), "messages", (_MainChunk(), {}))
 
     async def _mount_message(_widget):
@@ -245,6 +264,9 @@ async def test_execute_task_emits_subagent_namespace_events():
 
     started: list[tuple] = []
     ended: list[tuple] = []
+    text_updates: list[tuple[tuple, str]] = []
+    tool_calls: list[tuple[tuple, str, dict]] = []
+    updates: list[tuple[tuple, str]] = []
 
     adapter = TextualUIAdapter(
         mount_message=_mount_message,
@@ -252,6 +274,11 @@ async def test_execute_task_emits_subagent_namespace_events():
         request_approval=_request_approval,
         on_subagent_start=lambda namespace: started.append(namespace),
         on_subagent_end=lambda namespace: ended.append(namespace),
+        on_subagent_text=lambda namespace, text: text_updates.append((namespace, text)),
+        on_subagent_tool_call=lambda namespace, name, args: tool_calls.append(
+            (namespace, name, args)
+        ),
+        on_subagent_update=lambda namespace, status: updates.append((namespace, status)),
     )
 
     await execute_task_textual(
@@ -265,7 +292,47 @@ async def test_execute_task_emits_subagent_namespace_events():
 
     assert started == [("worker",)]
     assert ended == [("worker",)]
+    assert text_updates == [(("worker",), "working"), (("worker",), " done")]
+    assert tool_calls == [
+        (("worker",), "read_file", {"file_path": "/tmp/demo.txt"})
+    ]
+    assert updates == [(("worker",), "todo update: 2 item(s)")]
     print("✅ [S5] execute_task_textual emits sub-agent start/end callbacks")
+
+
+async def test_subagent_panel_lifecycle():
+    """Test subagent panel mount, stream updates, and cleanup in the app."""
+    app = DeepAgentsApp(
+        agent=None,
+        task_manager=None,
+    )
+
+    async with app.run_test(size=(120, 40), notifications=True) as pilot:
+        namespace = ("worker", "abc123")
+
+        app._on_subagent_stream_start(namespace)
+        await pilot.pause()
+        await asyncio.sleep(0.1)
+        await pilot.pause()
+
+        panels = app.query(SubagentPanel)
+        assert len(panels) == 1
+        panel = panels.first()
+
+        await app._on_subagent_stream_text(namespace, "hello from worker")
+        await app._on_subagent_stream_tool_call(namespace, "read_file", {"file_path": "README.md"})
+        await app._on_subagent_stream_update(namespace, "todo update: 1 item(s)")
+        await pilot.pause()
+
+        assert "hello from worker" in panel._content
+
+        app._on_subagent_stream_end(namespace)
+        await pilot.pause()
+        await asyncio.sleep(0.1)
+        await pilot.pause()
+
+        assert len(app.query(SubagentPanel)) == 0
+        print("✅ [S6] Subagent panel lifecycle mount/stream/cleanup works")
 
 
 if __name__ == "__main__":
@@ -291,3 +358,9 @@ if __name__ == "__main__":
     print("Test 4: execute_task_textual namespace callbacks")
     print("=" * 60)
     asyncio.run(test_execute_task_emits_subagent_namespace_events())
+
+    print()
+    print("=" * 60)
+    print("Test 5: subagent panel lifecycle")
+    print("=" * 60)
+    asyncio.run(test_subagent_panel_lifecycle())
